@@ -6,14 +6,14 @@ use halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Error},
 };
 
-use crate::{
+use crate::gadgets::{
     bloom_filter::{
         BloomFilterChip, BloomFilterChipConfig, BloomFilterConfig, BloomFilterInstructions,
     },
     hash::{HashChip, HashConfig, HashInstructions},
     response_accumulator::ResponseAccumulatorInstructions,
 };
-use crate::{
+use crate::gadgets::{
     hash::HashFunctionConfig,
     response_accumulator::{ResponseAccumulatorChip, ResponseAccumulatorChipConfig},
 };
@@ -155,7 +155,7 @@ mod tests {
         plonk::{Advice, Circuit, Column, Instance},
     };
 
-    use crate::hash::HashFunctionConfig;
+    use crate::gadgets::hash::HashFunctionConfig;
 
     use super::{
         BloomFilterChip, BloomFilterChipConfig, BloomFilterConfig, BloomFilterInstructions,

@@ -1,9 +1,10 @@
 use std::marker::PhantomData;
 
-use crate::{
+use crate::gadgets::{
     hash::{HashChip, HashConfig, HashFunctionConfig, HashInstructions},
-    utils::{decompose_word, print_value, print_values, to_u32},
+    
 };
+use crate::utils::{decompose_word, print_value, print_values, to_u32};
 /// Gadget that implements the bloom filter lookup:
 ///
 /// Given the `bloom_input`, `bloom_index`, `class_index` inputs, it:
