@@ -1,0 +1,16 @@
+[package]
+name = "zero_g"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "zero_g"
+path = "src/lib.rs"
+
+[features]
+dev-graph = ["halo2_proofs/dev-graph", "plotters"]
+
+[dependencies]
+plotters = { version = "0.3.0", optional = true }
+halo2_proofs = "0.3.0"
+num-bigint = "0.4.3"
