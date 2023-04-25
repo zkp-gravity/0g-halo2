@@ -33,18 +33,16 @@ fn main() -> Result<()> {
     assert_eq!(input_order.shape(), [num_input_bits]);
 
     let wnn = Wnn::new(
-        bits_per_input,
         num_classes,
         num_filter_entries,
         num_filter_hashes,
         num_filter_inputs,
-        num_inputs,
         p,
         bloom_filters,
         input_order,
     );
     let input_bits = Vec::from((0..num_input_bits).map(|_| false).collect::<Vec<_>>());
-    wnn.predict(input_bits);
+    println!("{:?}", wnn.predict(input_bits));
 
     Ok(())
 }
