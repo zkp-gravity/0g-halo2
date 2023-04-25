@@ -7,8 +7,6 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use crate::utils::print_values;
-
 pub(crate) trait ResponseAccumulatorInstructions<F: PrimeField> {
     fn accumulate_responses(
         &self,

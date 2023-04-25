@@ -1,5 +1,5 @@
 use hdf5::{File, Result};
-use ndarray::{Ix1, Ix3, IxDyn};
+use ndarray::{Ix1, Ix3};
 use zero_g::wnn::Wnn;
 
 fn main() -> Result<()> {

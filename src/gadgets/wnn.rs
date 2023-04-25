@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter},
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
     pasta::group::ff::{PrimeField, PrimeFieldBits},
-    plonk::{Advice, Column, ConstraintSystem, Error},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error},
 };
 
 use crate::gadgets::{
@@ -34,7 +34,7 @@ struct WnnConfig {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct WnnChipConfig {
+pub struct WnnChipConfig {
     hash_chip_config: HashConfig,
     bloom_filter_chip_config: BloomFilterChipConfig,
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
@@ -141,107 +141,97 @@ impl<F: PrimeField + PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
     }
 }
 
+pub struct WnnCircuit<
+    F: PrimeField,
+    const P: u64,
+    const L: usize,
+    const N_HASHES: usize,
+    const BITS_PER_HASH: usize,
+> {
+    inputs: Vec<u64>,
+    bloom_filter_arrays: Vec<Vec<Vec<bool>>>,
+    _marker: PhantomData<F>,
+}
+
+impl<
+        F: PrimeFieldBits,
+        const P: u64,
+        const L: usize,
+        const N_HASHES: usize,
+        const BITS_PER_HASH: usize,
+    > Circuit<F> for WnnCircuit<F, P, L, N_HASHES, BITS_PER_HASH>
+{
+    type Config = WnnChipConfig;
+    type FloorPlanner = SimpleFloorPlanner;
+
+    fn without_witnesses(&self) -> Self {
+        Self {
+            inputs: vec![],
+            bloom_filter_arrays: vec![vec![]],
+            _marker: PhantomData,
+        }
+    }
+
+    fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
+        let instance = meta.instance_column();
+
+        let advice_columns = [
+            meta.advice_column(),
+            meta.advice_column(),
+            meta.advice_column(),
+            meta.advice_column(),
+            meta.advice_column(),
+        ];
+
+        for advice in advice_columns {
+            meta.enable_equality(advice);
+        }
+        meta.enable_equality(instance);
+
+        let constants = meta.fixed_column();
+        meta.enable_constant(constants);
+
+        let bloom_filter_config = BloomFilterConfig {
+            n_hashes: N_HASHES,
+            bits_per_hash: BITS_PER_HASH,
+        };
+        let hash_function_config = HashFunctionConfig { p: P, l: L };
+        let wnn_config = WnnConfig {
+            bloom_filter_config,
+            hash_function_config,
+        };
+        WnnChip::configure(meta, advice_columns, wnn_config)
+    }
+
+    fn synthesize(
+        &self,
+        config: Self::Config,
+        mut layouter: impl halo2_proofs::circuit::Layouter<F>,
+    ) -> Result<(), halo2_proofs::plonk::Error> {
+        let wnn_chip = WnnChip::construct(config);
+
+        wnn_chip.predict(
+            &mut layouter,
+            self.bloom_filter_arrays.clone(),
+            self.inputs.iter().map(|v| F::from(*v)).collect(),
+        )?;
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::marker::PhantomData;
 
-    use halo2_proofs::{
-        circuit::{SimpleFloorPlanner, Value},
-        dev::MockProver,
-        pasta::{
-            group::ff::{PrimeField, PrimeFieldBits},
-            Fp,
-        },
-        plonk::{Advice, Circuit, Column, Instance},
-    };
+    use halo2_proofs::{dev::MockProver, pasta::Fp};
 
-    use crate::gadgets::hash::HashFunctionConfig;
-
-    use super::{
-        BloomFilterChip, BloomFilterChipConfig, BloomFilterConfig, BloomFilterInstructions,
-        WnnChip, WnnChipConfig, WnnConfig, WnnInstructions,
-    };
-
-    #[derive(Default)]
-    struct MyCircuit<F: PrimeField> {
-        inputs: Vec<u64>,
-        bloom_filter_arrays: Vec<Vec<Vec<bool>>>,
-        _marker: PhantomData<F>,
-    }
-
-    #[derive(Clone, Debug)]
-    struct Config {
-        wnn_chip_config: WnnChipConfig,
-        advice_columns: [Column<Advice>; 5],
-        instance: Column<Instance>,
-    }
-
-    impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
-        type Config = Config;
-        type FloorPlanner = SimpleFloorPlanner;
-
-        fn without_witnesses(&self) -> Self {
-            Self::default()
-        }
-
-        fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
-            let instance = meta.instance_column();
-
-            let advice_columns = [
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-                meta.advice_column(),
-            ];
-
-            for advice in advice_columns {
-                meta.enable_equality(advice);
-            }
-            meta.enable_equality(instance);
-
-            let constants = meta.fixed_column();
-            meta.enable_constant(constants);
-
-            let bloom_filter_config = BloomFilterConfig {
-                n_hashes: 2,
-                bits_per_hash: 2,
-            };
-            let hash_function_config = HashFunctionConfig { p: 17, l: 4 };
-            let wnn_config = WnnConfig {
-                bloom_filter_config,
-                hash_function_config,
-            };
-            let wnn_chip_config = WnnChip::configure(meta, advice_columns, wnn_config);
-
-            Config {
-                wnn_chip_config,
-                advice_columns,
-                instance,
-            }
-        }
-
-        fn synthesize(
-            &self,
-            config: Self::Config,
-            mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-        ) -> Result<(), halo2_proofs::plonk::Error> {
-            let wnn_chip = WnnChip::construct(config.wnn_chip_config);
-
-            wnn_chip.predict(
-                &mut layouter,
-                self.bloom_filter_arrays.clone(),
-                self.inputs.iter().map(|v| F::from(*v)).collect(),
-            )?;
-
-            Ok(())
-        }
-    }
+    use super::WnnCircuit;
 
     #[test]
     fn test() {
         let k = 6;
-        let circuit = MyCircuit::<Fp> {
+        let circuit = WnnCircuit::<Fp, 17, 4, 2, 2> {
             inputs: vec![2, 7],
             bloom_filter_arrays: vec![
                 vec![
@@ -268,7 +258,7 @@ mod tests {
         root.fill(&WHITE).unwrap();
         let root = root.titled("Hash Chip Layout", ("sans-serif", 60)).unwrap();
 
-        let circuit = MyCircuit::<Fp> {
+        let circuit = WnnCircuit::<Fp, 17, 4, 2, 2> {
             inputs: vec![2, 7],
             bloom_filter_arrays: vec![
                 vec![

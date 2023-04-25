@@ -97,11 +97,7 @@ impl<F: PrimeField> HashChip<F> {
 }
 
 impl<F: PrimeField> HashInstructions<F> for HashChip<F> {
-    fn hash(
-        &self,
-        mut layouter: &mut impl Layouter<F>,
-        input: F,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    fn hash(&self, layouter: &mut impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error> {
         layouter.assign_region(
             || "hash",
             |mut region| {
@@ -144,10 +140,10 @@ mod tests {
     use std::marker::PhantomData;
 
     use halo2_proofs::{
-        circuit::{SimpleFloorPlanner, Value},
+        circuit::SimpleFloorPlanner,
         dev::MockProver,
         pasta::{group::ff::PrimeField, Fp},
-        plonk::{Advice, Circuit, Column, Instance},
+        plonk::{Circuit, Column, Instance},
     };
 
     use super::{HashChip, HashConfig, HashFunctionConfig, HashInstructions};
@@ -161,7 +157,6 @@ mod tests {
     #[derive(Clone, Debug)]
     struct Config {
         hash_config: HashConfig,
-        input: Column<Advice>,
         instance: Column<Instance>,
     }
 
@@ -198,7 +193,6 @@ mod tests {
                     hash,
                     hash_function_config,
                 ),
-                input,
                 instance,
             }
         }
