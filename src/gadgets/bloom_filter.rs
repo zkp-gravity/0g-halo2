@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::utils::{decompose_word, to_u32};
+use ff::{PrimeField, PrimeFieldBits};
 /// Gadget that implements the bloom filter lookup:
 ///
 /// Given the `bloom_input`, `bloom_index`, `class_index` inputs, it:
@@ -10,7 +11,6 @@ use crate::utils::{decompose_word, to_u32};
 /// - Returns 1 iff. all indices led to a positive lookup
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
-    pasta::group::ff::{PrimeField, PrimeFieldBits},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector, TableColumn},
     poly::Rotation,
 };
@@ -104,7 +104,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
         let table_bloom_index = meta.lookup_table_column();
         let table_bloom_value = meta.lookup_table_column();
         let bloom_filter_lookup_selector = meta.complex_selector();
-        meta.lookup(|meta| {
+        meta.lookup("bloom filter lookup", |meta| {
             let selector = meta.query_selector(bloom_filter_lookup_selector);
 
             let bloom_index = meta.query_advice(bloom_index, Rotation::cur());
@@ -381,13 +381,11 @@ impl<F: PrimeField + PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterC
 mod tests {
     use std::marker::PhantomData;
 
+    use ff::{PrimeField, PrimeFieldBits};
     use halo2_proofs::{
         circuit::{SimpleFloorPlanner, Value},
         dev::MockProver,
-        pasta::{
-            group::ff::{PrimeField, PrimeFieldBits},
-            Fp,
-        },
+        halo2curves::pasta::Fp,
         plonk::{Advice, Circuit, Column, Instance},
     };
     use ndarray::{array, Array2};

@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
-    pasta::group::ff::PrimeField,
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Expression, Selector},
     poly::Rotation,
 };
@@ -139,10 +139,11 @@ impl<F: PrimeField> HashInstructions<F> for HashChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
+    use ff::PrimeField;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
         dev::MockProver,
-        pasta::{group::ff::PrimeField, Fp},
+        halo2curves::pasta::Fp,
         plonk::{Circuit, Column, Instance},
     };
 

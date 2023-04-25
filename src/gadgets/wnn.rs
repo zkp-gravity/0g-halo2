@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
+use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
-    pasta::group::ff::{PrimeField, PrimeFieldBits},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
 };
 use ndarray::{array, Array3};
@@ -265,7 +265,8 @@ impl<
 mod tests {
     use std::marker::PhantomData;
 
-    use halo2_proofs::{dev::MockProver, pasta::Fp};
+    use halo2_proofs::dev::MockProver;
+    use halo2_proofs::halo2curves::pasta::Fp;
     use ndarray::array;
 
     use super::WnnCircuit;

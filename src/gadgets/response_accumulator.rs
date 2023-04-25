@@ -2,10 +2,10 @@ use std::marker::PhantomData;
 
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
-    pasta::group::ff::{PrimeField, PrimeFieldBits},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector},
     poly::Rotation,
 };
+use ff::{PrimeField, PrimeFieldBits};
 
 pub(crate) trait ResponseAccumulatorInstructions<F: PrimeField> {
     fn accumulate_responses(

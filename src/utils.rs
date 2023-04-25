@@ -1,7 +1,5 @@
-use halo2_proofs::{
-    circuit::Value,
-    pasta::group::ff::{PrimeField, PrimeFieldBits},
-};
+use ff::{PrimeField, PrimeFieldBits};
+use halo2_proofs::circuit::Value;
 use num_bigint::BigUint;
 
 pub(crate) fn print_value<F: PrimeFieldBits>(name: &str, value: Value<&F>) {
@@ -58,7 +56,7 @@ pub(crate) fn to_u32<F: PrimeFieldBits>(field_element: &F) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use halo2_proofs::pasta::Fp;
+    use halo2_proofs::halo2curves::pasta::Fp;
     use num_bigint::BigUint;
 
     use crate::utils::{decompose_word, to_u32};

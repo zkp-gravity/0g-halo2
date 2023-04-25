@@ -1,4 +1,4 @@
-use halo2_proofs::{dev::MockProver, pasta::Fp};
+use halo2_proofs::{dev::MockProver, halo2curves::pasta::Fp};
 use ndarray::{Array1, Array3};
 use num_bigint::BigUint;
 
