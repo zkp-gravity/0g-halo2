@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::utils::{decompose_word, print_value, print_values, to_u32};
+use crate::utils::{decompose_word, to_u32};
 /// Gadget that implements the bloom filter lookup:
 ///
 /// Given the `bloom_input`, `bloom_index`, `class_index` inputs, it:
@@ -265,8 +265,8 @@ impl<F: PrimeField + PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterC
                 let bloom_values = bloom_values.transpose_vec(n_hashes);
 
                 // Assign hash values
-                print_value("Hash value", hash_value.value());
-                print_values("Hash values", &hash_values);
+                // print_value("Hash value", hash_value.value());
+                // print_values("Hash values", &hash_values);
                 for (i, hash_value) in hash_values.iter().enumerate() {
                     region.assign_advice(
                         || format!("hash_value_{i}"),
@@ -291,7 +291,7 @@ impl<F: PrimeField + PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterC
                     0,
                     F::ZERO,
                 )?;
-                print_values("hash_accumulators", &hash_accumulators);
+                // print_values("hash_accumulators", &hash_accumulators);
                 for (i, hash_accumulator) in hash_accumulators.iter().enumerate() {
                     if i == 0 {
                         continue;
@@ -316,8 +316,8 @@ impl<F: PrimeField + PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterC
                 }
 
                 // Assign bloom values
-                println!("bloom_index: {:?}", bloom_index);
-                print_values("bloom_values", &bloom_values);
+                // println!("bloom_index: {:?}", bloom_index);
+                // print_values("bloom_values", &bloom_values);
                 for (i, bloom_value) in bloom_values.iter().enumerate() {
                     region.assign_advice(
                         || format!("bloom_value_{i}"),
@@ -336,7 +336,7 @@ impl<F: PrimeField + PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterC
                     0,
                     F::ONE,
                 )?;
-                print_values("bloom_accumulators", &bloom_accumulators);
+                // print_values("bloom_accumulators", &bloom_accumulators);
 
                 let mut bloom_response: Option<AssignedCell<F, F>> = None;
                 for (i, bloom_accumulator) in bloom_accumulators.iter().enumerate() {
