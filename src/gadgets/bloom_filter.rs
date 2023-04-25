@@ -322,6 +322,7 @@ impl<F: PrimeField + PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterC
                 }
 
                 // Assign bloom values
+                println!("bloom_index: {:?}", bloom_index);
                 print_values("bloom_values", &bloom_values);
                 for (i, bloom_value) in bloom_values.iter().enumerate() {
                     region.assign_advice(

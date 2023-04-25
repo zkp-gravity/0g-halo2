@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
     pasta::group::ff::{PrimeField, PrimeFieldBits},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
 };
 
 use crate::gadgets::{
@@ -123,7 +123,7 @@ impl<F: PrimeField + PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
         for c in 0..n_classes {
             responses.push(Vec::new());
             for (i, hash) in hashes.clone().iter().enumerate() {
-                let array_index = i * n_classes + c;
+                let array_index = c * hashes.len() + i;
                 responses[c].push(bloom_filter_chip.bloom_lookup(
                     layouter,
                     hash.clone(),
@@ -139,6 +139,12 @@ impl<F: PrimeField + PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
             })
             .collect::<Result<Vec<_>, _>>()
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct WnnCircuitConfig {
+    wnn_chip_config: WnnChipConfig,
+    instance_column: Column<Instance>,
 }
 
 pub struct WnnCircuit<
@@ -161,7 +167,7 @@ impl<
         const BITS_PER_HASH: usize,
     > Circuit<F> for WnnCircuit<F, P, L, N_HASHES, BITS_PER_HASH>
 {
-    type Config = WnnChipConfig;
+    type Config = WnnCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -173,7 +179,7 @@ impl<
     }
 
     fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
-        let instance = meta.instance_column();
+        let instance_column = meta.instance_column();
 
         let advice_columns = [
             meta.advice_column(),
@@ -186,7 +192,7 @@ impl<
         for advice in advice_columns {
             meta.enable_equality(advice);
         }
-        meta.enable_equality(instance);
+        meta.enable_equality(instance_column);
 
         let constants = meta.fixed_column();
         meta.enable_constant(constants);
@@ -200,7 +206,10 @@ impl<
             bloom_filter_config,
             hash_function_config,
         };
-        WnnChip::configure(meta, advice_columns, wnn_config)
+        WnnCircuitConfig {
+            wnn_chip_config: WnnChip::configure(meta, advice_columns, wnn_config),
+            instance_column,
+        }
     }
 
     fn synthesize(
@@ -208,13 +217,17 @@ impl<
         config: Self::Config,
         mut layouter: impl halo2_proofs::circuit::Layouter<F>,
     ) -> Result<(), halo2_proofs::plonk::Error> {
-        let wnn_chip = WnnChip::construct(config);
+        let wnn_chip = WnnChip::construct(config.wnn_chip_config);
 
-        wnn_chip.predict(
+        let result = wnn_chip.predict(
             &mut layouter,
             self.bloom_filter_arrays.clone(),
             self.inputs.iter().map(|v| F::from(*v)).collect(),
         )?;
+
+        for i in 0..result.len() {
+            layouter.constrain_instance(result[i].cell(), config.instance_column, i)?;
+        }
 
         Ok(())
     }
@@ -240,12 +253,20 @@ mod tests {
                 ],
                 vec![
                     vec![true, false, true, false],
-                    vec![true, true, false, false],
+                    vec![true, true, false, true],
                 ],
             ],
             _marker: PhantomData,
         };
-        let prover = MockProver::run(k, &circuit, vec![vec![]]).unwrap();
+
+        // Expected result:
+        // - ((2^3 % 17) % 16) = 8 -> Indices 2 & 0
+        // - ((7^3 % 17) % 16) = 3 -> Indices 0 & 3
+        // - Class 0: 1 + 0 = 1
+        // - Class 1: 1 + 1 = 2
+        let expected_result = vec![Fp::from(1), Fp::from(2)];
+
+        let prover = MockProver::run(k, &circuit, vec![expected_result]).unwrap();
         prover.assert_satisfied();
     }
 
