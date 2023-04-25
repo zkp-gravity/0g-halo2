@@ -4,6 +4,7 @@ use zero_g::wnn::Wnn;
 
 fn main() -> Result<()> {
     let file = File::open("models/model_28input_1024entry_2hash_2bpi.pickle.hdf5")?;
+    // let file = File::open("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")?;
     for attr_name in file.attr_names()? {
         let attr = file.attr(&attr_name)?.read_scalar::<i64>()?;
         println!("{attr_name}: {attr}");
@@ -32,7 +33,8 @@ fn main() -> Result<()> {
     let num_input_bits = num_inputs * bits_per_input;
     assert_eq!(input_order.shape(), [num_input_bits]);
 
-    let wnn = Wnn::new(
+    let wnn = Wnn::<2097143, 20, 2, 10>::new(
+        // let wnn = Wnn::<509, 8, 1, 8>::new(
         num_classes,
         num_filter_entries,
         num_filter_hashes,
@@ -43,7 +45,9 @@ fn main() -> Result<()> {
     );
     let input_bits = Vec::from((0..num_input_bits).map(|_| false).collect::<Vec<_>>());
     println!("{:?}", wnn.predict(input_bits.clone()));
-    wnn.mock_proof(input_bits);
+
+    wnn.mock_proof(input_bits.clone(), 20);
+    wnn.proof_and_verify(input_bits, 20);
 
     Ok(())
 }

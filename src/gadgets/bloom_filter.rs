@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::utils::{decompose_word, to_u32};
-use ff::{PrimeField, PrimeFieldBits};
+use ff::PrimeField;
 /// Gadget that implements the bloom filter lookup:
 ///
 /// Given the `bloom_input`, `bloom_index`, `class_index` inputs, it:
@@ -196,7 +196,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
     }
 }
 
-impl<F: PrimeField + PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterChip<F> {
+impl<F: PrimeField> BloomFilterInstructions<F> for BloomFilterChip<F> {
     fn bloom_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -381,11 +381,11 @@ impl<F: PrimeField + PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterC
 mod tests {
     use std::marker::PhantomData;
 
-    use ff::{PrimeField, PrimeFieldBits};
+    use ff::PrimeField;
     use halo2_proofs::{
         circuit::{SimpleFloorPlanner, Value},
         dev::MockProver,
-        halo2curves::pasta::Fp,
+        halo2curves::bn256::Fr as Fp,
         plonk::{Advice, Circuit, Column, Instance},
     };
     use ndarray::{array, Array2};
@@ -409,7 +409,7 @@ mod tests {
         instance: Column<Instance>,
     }
 
-    impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
+    impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
 

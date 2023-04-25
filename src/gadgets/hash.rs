@@ -143,7 +143,7 @@ mod tests {
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
         dev::MockProver,
-        halo2curves::pasta::Fp,
+        halo2curves::bn256::Fr as Fp,
         plonk::{Circuit, Column, Instance},
     };
 

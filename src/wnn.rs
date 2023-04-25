@@ -1,10 +1,29 @@
-use halo2_proofs::{dev::MockProver, halo2curves::pasta::Fp};
+use std::time::Instant;
+
+use halo2_proofs::{
+    dev::MockProver,
+    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof},
+    poly::{
+        commitment::ParamsProver,
+        kzg::{
+            commitment::{KZGCommitmentScheme, ParamsKZG},
+            multiopen::{ProverGWC, VerifierGWC},
+            strategy::SingleStrategy,
+        },
+    },
+    transcript::{
+        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+    },
+};
 use ndarray::{Array1, Array3};
+
+use halo2_proofs::halo2curves::bn256::{Bn256, Fr as Fp, G1Affine};
 use num_bigint::BigUint;
+use rand_core::OsRng;
 
 use crate::gadgets::wnn::WnnCircuit;
 
-pub struct Wnn {
+pub struct Wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: usize> {
     num_classes: usize,
     num_filter_entries: usize,
     num_filter_hashes: usize,
@@ -16,7 +35,9 @@ pub struct Wnn {
     input_order: Array1<u64>,
 }
 
-impl Wnn {
+impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: usize>
+    Wnn<P, L, N_HASHES, BITS_PER_HASH>
+{
     pub fn new(
         num_classes: usize,
         num_filter_entries: usize,
@@ -105,11 +126,14 @@ impl Wnn {
             .collect::<Vec<_>>()
     }
 
-    pub fn mock_proof(&self, input_bits: Vec<bool>) {
-        assert_eq!(self.p, 2097143);
-        assert_eq!(self.num_filter_entries, 1024);
-        assert_eq!(self.num_filter_hashes, 2);
+    fn get_circuit(&self, hash_inputs: Vec<u64>) -> WnnCircuit<Fp, P, L, N_HASHES, BITS_PER_HASH> {
+        assert_eq!(self.p, P);
+        assert_eq!(self.num_filter_entries, 1 << BITS_PER_HASH);
+        assert_eq!(self.num_filter_hashes, N_HASHES);
+        WnnCircuit::new(hash_inputs, self.bloom_filters.clone())
+    }
 
+    pub fn mock_proof(&self, input_bits: Vec<bool>, k: u32) {
         let hash_inputs = self.compute_hash_inputs(input_bits.clone());
         let outputs: Vec<Fp> = self
             .predict(input_bits)
@@ -117,23 +141,71 @@ impl Wnn {
             .map(|o| Fp::from(*o as u64))
             .collect();
 
-        let circuit: WnnCircuit<Fp, 2097143, 20, 2, 10> =
-            WnnCircuit::new(hash_inputs, self.bloom_filters.clone());
+        let circuit = self.get_circuit(hash_inputs);
 
-        let mut k = 1;
-        loop {
-            if let Ok(prover) = MockProver::run(k, &circuit, vec![outputs.clone()]) {
-                println!("Running mock proving with k = {k}");
-                prover.assert_satisfied();
-                break;
-            }
-            k += 1;
+        let prover = MockProver::run(k, &circuit, vec![outputs.clone()]).unwrap();
+        prover.assert_satisfied();
 
-            if k > 30 {
-                panic!("Not possible to prove using 2^30 rows!");
-            }
-        }
         println!("Valid!");
         circuit.plot("real_wnn_layout.png", k);
+    }
+
+    pub fn proof_and_verify(&self, input_bits: Vec<bool>, k: u32) {
+        let hash_inputs = self.compute_hash_inputs(input_bits.clone());
+        let outputs: Vec<Fp> = self
+            .predict(input_bits)
+            .iter()
+            .map(|o| Fp::from(*o as u64))
+            .collect();
+
+        let circuit = self.get_circuit(hash_inputs);
+
+        println!("Key gen...");
+        let start = Instant::now();
+
+        let params: ParamsKZG<Bn256> = ParamsKZG::new(k);
+        let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+        let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+
+        let duration = start.elapsed();
+        println!("Took: {:?}", duration);
+
+        println!("Proving...");
+        let start = Instant::now();
+
+        let mut transcript: Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>> =
+            Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+        create_proof::<KZGCommitmentScheme<Bn256>, ProverGWC<Bn256>, _, _, _, _>(
+            &params,
+            &pk,
+            &[circuit],
+            &[&[outputs.as_ref()]],
+            OsRng,
+            &mut transcript,
+        )
+        .unwrap();
+        let proof = transcript.finalize();
+
+        let duration = start.elapsed();
+        println!("Took: {:?}", duration);
+
+        println!("Verifying...");
+        let start = Instant::now();
+
+        let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        let strategy = SingleStrategy::new(&params);
+        verify_proof::<_, VerifierGWC<Bn256>, _, _, _>(
+            &params,
+            pk.get_vk(),
+            strategy.clone(),
+            &[&[outputs.as_ref()]],
+            &mut transcript.clone(),
+        )
+        .unwrap();
+
+        let duration = start.elapsed();
+        println!("Took: {:?}", duration);
+
+        println!("Done!");
     }
 }

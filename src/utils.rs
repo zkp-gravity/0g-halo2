@@ -1,12 +1,14 @@
-use ff::{PrimeField, PrimeFieldBits};
+use ff::PrimeField;
 use halo2_proofs::circuit::Value;
 use num_bigint::BigUint;
 
-pub(crate) fn print_value<F: PrimeFieldBits>(name: &str, value: Value<&F>) {
+#[allow(dead_code)]
+pub(crate) fn print_value<F: PrimeField>(name: &str, value: Value<&F>) {
     value.map(|x| println!("{name}: {}", to_u32(x)));
 }
 
-pub(crate) fn print_values<F: PrimeFieldBits>(name: &str, values: &Vec<Value<F>>) {
+#[allow(dead_code)]
+pub(crate) fn print_values<F: PrimeField>(name: &str, values: &Vec<Value<F>>) {
     values.iter().for_each(|value| {
         value.map(|x| println!("{name}: {}", to_u32(&x)));
     });
@@ -24,17 +26,30 @@ pub(crate) fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
         .fold(F::ZERO, |acc, b| acc * shift_factor + F::from(*b as u64))
 }
 
-pub(crate) fn decompose_word<F: PrimeFieldBits>(
+/// Implement to_le_bits for any `PrimeField` type, not just `PrimeFieldBits`
+/// For example, the BN256 Fr type does not implement PrimeFieldBits
+fn to_le_bits<F: PrimeField>(x: &F, n_bits: usize) -> Vec<bool> {
+    // This assumes numbers are stored in little endian order
+    let mut x = BigUint::from_bytes_le(x.to_repr().as_ref());
+
+    let mut result = vec![];
+    let zero = BigUint::from(0u8);
+    let one = BigUint::from(1u8);
+    for _ in 0..n_bits {
+        result.push(if (&x & &one) == zero { false } else { true });
+        x >>= 1;
+    }
+
+    result
+}
+
+pub(crate) fn decompose_word<F: PrimeField>(
     word: &F,
     num_windows: usize,
     window_num_bits: usize,
 ) -> Vec<F> {
     // Get bits in little endian order, select `word_num_bits` least significant bits
-    let bits: Vec<_> = word
-        .to_le_bits()
-        .into_iter()
-        .take(num_windows * window_num_bits)
-        .collect();
+    let bits = to_le_bits(word, num_windows * window_num_bits);
     let two = F::from(2);
 
     bits.chunks_exact(window_num_bits)
@@ -47,16 +62,16 @@ pub(crate) fn decompose_word<F: PrimeFieldBits>(
         .collect()
 }
 
-pub(crate) fn to_u32<F: PrimeFieldBits>(field_element: &F) -> u32 {
-    let bits: Vec<_> = field_element.to_le_bits().into_iter().take(32).collect();
-    bits.iter()
+pub(crate) fn to_u32<F: PrimeField>(field_element: &F) -> u32 {
+    to_le_bits(field_element, 32)
+        .iter()
         .rev()
         .fold(0u32, |acc, b| (acc << 1) + (*b as u32))
 }
 
 #[cfg(test)]
 mod tests {
-    use halo2_proofs::halo2curves::pasta::Fp;
+    use halo2_proofs::halo2curves::bn256::Fr as Fp;
     use num_bigint::BigUint;
 
     use crate::utils::{decompose_word, to_u32};

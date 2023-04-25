@@ -1,11 +1,11 @@
 use std::marker::PhantomData;
 
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector},
     poly::Rotation,
 };
-use ff::{PrimeField, PrimeFieldBits};
 
 pub(crate) trait ResponseAccumulatorInstructions<F: PrimeField> {
     fn accumulate_responses(
@@ -62,7 +62,7 @@ impl<F: PrimeField> ResponseAccumulatorChip<F> {
     }
 }
 
-impl<F: PrimeFieldBits> ResponseAccumulatorInstructions<F> for ResponseAccumulatorChip<F> {
+impl<F: PrimeField> ResponseAccumulatorInstructions<F> for ResponseAccumulatorChip<F> {
     fn accumulate_responses(
         &self,
         layouter: &mut impl Layouter<F>,

@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ff::{PrimeField, PrimeFieldBits};
+use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
@@ -87,7 +87,7 @@ impl<F: PrimeField> WnnChip<F> {
     }
 }
 
-impl<F: PrimeField + PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
+impl<F: PrimeField> WnnInstructions<F> for WnnChip<F> {
     fn predict(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -159,7 +159,7 @@ pub struct WnnCircuit<
 }
 
 impl<
-        F: PrimeFieldBits,
+        F: PrimeField,
         const P: u64,
         const L: usize,
         const N_HASHES: usize,
@@ -188,7 +188,7 @@ impl<
 }
 
 impl<
-        F: PrimeFieldBits,
+        F: PrimeField,
         const P: u64,
         const L: usize,
         const N_HASHES: usize,
@@ -266,7 +266,7 @@ mod tests {
     use std::marker::PhantomData;
 
     use halo2_proofs::dev::MockProver;
-    use halo2_proofs::halo2curves::pasta::Fp;
+    use halo2_proofs::halo2curves::bn256::Fr as Fp;
     use ndarray::array;
 
     use super::WnnCircuit;
