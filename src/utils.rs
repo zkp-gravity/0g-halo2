@@ -17,7 +17,13 @@ pub(crate) fn print_values<F: PrimeFieldBits>(name: &str, values: &Vec<Value<F>>
 pub(crate) fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
     let x_bigint = BigUint::from_bytes_le(x.to_repr().as_ref());
     let quotient = x_bigint / divisor;
-    F::from(quotient.try_into().unwrap())
+
+    // Convert from BigInt to F
+    let bytes_be = quotient.to_bytes_be();
+    let shift_factor = F::from(256);
+    bytes_be
+        .iter()
+        .fold(F::ZERO, |acc, b| acc * shift_factor + F::from(*b as u64))
 }
 
 pub(crate) fn decompose_word<F: PrimeFieldBits>(
@@ -44,7 +50,7 @@ pub(crate) fn decompose_word<F: PrimeFieldBits>(
 }
 
 pub(crate) fn to_u32<F: PrimeFieldBits>(field_element: &F) -> u32 {
-    let bits: Vec<_> = field_element.to_le_bits().into_iter().take(64).collect();
+    let bits: Vec<_> = field_element.to_le_bits().into_iter().take(32).collect();
     bits.iter()
         .rev()
         .fold(0u32, |acc, b| (acc << 1) + (*b as u32))
@@ -84,10 +90,9 @@ mod tests {
             integer_division(Fp::from(7), BigUint::from(2u8)),
             Fp::from(3)
         );
-        // TODO: Fix failing test
-        // assert_eq!(
-        //     integer_division(-Fp::one(), BigUint::from(2u8)).double(),
-        //     Fp::one()
-        // );
+        assert_eq!(
+            integer_division(-Fp::one(), BigUint::from(2u8)).double(),
+            -Fp::one()
+        );
     }
 }
