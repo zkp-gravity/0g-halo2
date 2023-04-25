@@ -1,5 +1,8 @@
+use halo2_proofs::{dev::MockProver, pasta::Fp};
 use ndarray::{Array1, Array3};
 use num_bigint::BigUint;
+
+use crate::gadgets::wnn::WnnCircuit;
 
 pub struct Wnn {
     num_classes: usize,
@@ -35,12 +38,13 @@ impl Wnn {
         }
     }
 
-    fn mish_mash_hash(&self, x: BigUint) -> BigUint {
+    fn mish_mash_hash(&self, x: u64) -> BigUint {
+        let x = BigUint::from(x);
         let modulus = BigUint::from(self.num_filter_entries).pow(self.num_filter_hashes as u32);
         ((&x * &x * &x) % self.p) % modulus
     }
 
-    pub fn predict(&self, input_bits: Vec<bool>) -> Vec<u32> {
+    fn compute_hash_inputs(&self, input_bits: Vec<bool>) -> Vec<u64> {
         assert_eq!(input_bits.len(), self.input_order.shape()[0]);
 
         // Permute inputs
@@ -51,14 +55,14 @@ impl Wnn {
             .collect();
 
         // Pack inputs into integers of `num_filter_inputs` bits
-        let hash_inputs: Vec<BigUint> = inputs_permuted
+        inputs_permuted
             .chunks_exact(self.num_filter_inputs)
-            .map(|chunk| {
-                chunk.iter().fold(BigUint::from(0u8), |acc, b| {
-                    acc * 2u8 + BigUint::from(*b as usize)
-                })
-            })
-            .collect();
+            .map(|chunk| chunk.iter().fold(0, |acc, b| (acc << 1) + (*b as u64)))
+            .collect()
+    }
+
+    pub fn predict(&self, input_bits: Vec<bool>) -> Vec<u32> {
+        let hash_inputs = self.compute_hash_inputs(input_bits);
         assert_eq!(hash_inputs.len(), self.bloom_filters.shape()[1]);
 
         // Hash
@@ -99,5 +103,34 @@ impl Wnn {
                     .sum::<u32>()
             })
             .collect::<Vec<_>>()
+    }
+
+    pub fn mock_proof(&self, input_bits: Vec<bool>) {
+        assert_eq!(self.p, 2097143);
+        assert_eq!(self.num_filter_entries, 1024);
+        assert_eq!(self.num_filter_hashes, 2);
+
+        let hash_inputs = self.compute_hash_inputs(input_bits.clone());
+        let outputs: Vec<Fp> = self
+            .predict(input_bits)
+            .iter()
+            .map(|o| Fp::from(*o as u64))
+            .collect();
+
+        let circuit: WnnCircuit<Fp, 2097143, 20, 2, 10> =
+            WnnCircuit::new(hash_inputs, self.bloom_filters.clone());
+
+        let mut proved = false;
+        for k in 0..30 {
+            if let Ok(prover) = MockProver::run(k, &circuit, vec![outputs.clone()]) {
+                println!("Running mock proving with k = {k}");
+                prover.assert_satisfied();
+                proved = true;
+                break;
+            }
+        }
+        if proved {
+            println!("Valid!")
+        }
     }
 }

@@ -5,6 +5,7 @@ use halo2_proofs::{
     pasta::group::ff::{PrimeField, PrimeFieldBits},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
 };
+use ndarray::{array, Array3};
 
 use crate::gadgets::{
     bloom_filter::{
@@ -22,7 +23,7 @@ pub(crate) trait WnnInstructions<F: PrimeField> {
     fn predict(
         &self,
         layouter: &mut impl Layouter<F>,
-        bloom_filter_arrays: Vec<Vec<Vec<bool>>>,
+        bloom_filter_arrays: Array3<bool>,
         inputs: Vec<F>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 }
@@ -90,10 +91,10 @@ impl<F: PrimeField + PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
     fn predict(
         &self,
         layouter: &mut impl Layouter<F>,
-        bloom_filter_arrays: Vec<Vec<Vec<bool>>>,
+        bloom_filter_arrays: Array3<bool>,
         inputs: Vec<F>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        assert_eq!(bloom_filter_arrays.len(), inputs.len());
+        assert_eq!(bloom_filter_arrays.shape()[1], inputs.len());
 
         let hash_chip = HashChip::construct(self.config.hash_chip_config.clone());
         let mut bloom_filter_chip =
@@ -107,16 +108,14 @@ impl<F: PrimeField + PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
             .map(|input| hash_chip.hash(layouter, *input))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let n_classes = bloom_filter_arrays[0].len();
-        for bloom_filter_array in &bloom_filter_arrays {
-            assert_eq!(bloom_filter_array.len(), n_classes);
-        }
+        let n_classes = bloom_filter_arrays.shape()[0];
 
         // Flatten array: from shape (N, C, B) to (N * C, B)
+        let shape = bloom_filter_arrays.shape();
         let bloom_filter_arrays_flat = bloom_filter_arrays
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
+            .clone()
+            .into_shape((shape[0] * shape[1], shape[2]))
+            .unwrap();
         bloom_filter_chip.load(layouter, bloom_filter_arrays_flat)?;
 
         let mut responses = vec![];
@@ -155,8 +154,25 @@ pub struct WnnCircuit<
     const BITS_PER_HASH: usize,
 > {
     inputs: Vec<u64>,
-    bloom_filter_arrays: Vec<Vec<Vec<bool>>>,
+    bloom_filter_arrays: Array3<bool>,
     _marker: PhantomData<F>,
+}
+
+impl<
+        F: PrimeFieldBits,
+        const P: u64,
+        const L: usize,
+        const N_HASHES: usize,
+        const BITS_PER_HASH: usize,
+    > WnnCircuit<F, P, L, N_HASHES, BITS_PER_HASH>
+{
+    pub fn new(inputs: Vec<u64>, bloom_filter_arrays: Array3<bool>) -> Self {
+        Self {
+            inputs,
+            bloom_filter_arrays,
+            _marker: PhantomData,
+        }
+    }
 }
 
 impl<
@@ -173,7 +189,7 @@ impl<
     fn without_witnesses(&self) -> Self {
         Self {
             inputs: vec![],
-            bloom_filter_arrays: vec![vec![]],
+            bloom_filter_arrays: array![[[]]],
             _marker: PhantomData,
         }
     }
@@ -238,6 +254,7 @@ mod tests {
     use std::marker::PhantomData;
 
     use halo2_proofs::{dev::MockProver, pasta::Fp};
+    use ndarray::array;
 
     use super::WnnCircuit;
 
@@ -246,15 +263,9 @@ mod tests {
         let k = 6;
         let circuit = WnnCircuit::<Fp, 17, 4, 2, 2> {
             inputs: vec![2, 7],
-            bloom_filter_arrays: vec![
-                vec![
-                    vec![true, false, true, false],
-                    vec![true, true, false, false],
-                ],
-                vec![
-                    vec![true, false, true, false],
-                    vec![true, true, false, true],
-                ],
+            bloom_filter_arrays: array![
+                [[true, false, true, false], [true, true, false, false],],
+                [[true, false, true, false], [true, true, false, true],],
             ],
             _marker: PhantomData,
         };
@@ -281,15 +292,9 @@ mod tests {
 
         let circuit = WnnCircuit::<Fp, 17, 4, 2, 2> {
             inputs: vec![2, 7],
-            bloom_filter_arrays: vec![
-                vec![
-                    vec![true, false, true, false],
-                    vec![true, true, false, false],
-                ],
-                vec![
-                    vec![true, false, true, false],
-                    vec![true, true, false, false],
-                ],
+            bloom_filter_arrays: array![
+                [[true, false, true, false], [true, true, false, false],],
+                [[true, false, true, false], [true, true, false, true],],
             ],
             _marker: PhantomData,
         };

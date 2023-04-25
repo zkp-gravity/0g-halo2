@@ -42,7 +42,8 @@ fn main() -> Result<()> {
         input_order,
     );
     let input_bits = Vec::from((0..num_input_bits).map(|_| false).collect::<Vec<_>>());
-    println!("{:?}", wnn.predict(input_bits));
+    println!("{:?}", wnn.predict(input_bits.clone()));
+    wnn.mock_proof(input_bits);
 
     Ok(())
 }

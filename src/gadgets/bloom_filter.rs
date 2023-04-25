@@ -14,6 +14,7 @@ use halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector, TableColumn},
     poly::Rotation,
 };
+use ndarray::Array2;
 
 pub(crate) trait BloomFilterInstructions<F: PrimeField> {
     fn bloom_lookup(
@@ -53,7 +54,7 @@ pub(crate) struct BloomFilterChipConfig {
 
 pub(crate) struct BloomFilterChip<F: PrimeField> {
     config: BloomFilterChipConfig,
-    bloom_filter_arrays: Option<Vec<Vec<bool>>>,
+    bloom_filter_arrays: Option<Array2<bool>>,
     _marker: PhantomData<F>,
 }
 
@@ -152,27 +153,19 @@ impl<F: PrimeField> BloomFilterChip<F> {
     pub(crate) fn load(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        bloom_filter_arrays: Vec<Vec<bool>>,
+        bloom_filter_arrays: Array2<bool>,
     ) -> Result<(), Error> {
-        for bloom_filter_array in &bloom_filter_arrays {
-            assert_eq!(
-                bloom_filter_array.len(),
-                1 << self.config.bloom_filter_config.bits_per_hash
-            );
-        }
+        let bloom_filter_length = 1 << self.config.bloom_filter_config.bits_per_hash;
+        assert_eq!(bloom_filter_arrays.shape()[1], bloom_filter_length);
 
         layouter.assign_table(
             || "bloom_filters",
             |mut table| {
-                let bloom_filter_length = 1 << self.config.bloom_filter_config.bits_per_hash;
-
                 let mut offset = 0usize;
 
-                for (bloom_index, bloom_array) in bloom_filter_arrays.iter().enumerate() {
-                    assert_eq!(bloom_array.len(), bloom_filter_length);
-
+                for bloom_index in 0..bloom_filter_arrays.shape()[0] {
                     for i in 0..bloom_filter_length {
-                        let bloom_value = bloom_array[i];
+                        let bloom_value = bloom_filter_arrays[(bloom_index, i)];
                         let bloom_value = if bloom_value { F::ONE } else { F::ZERO };
                         let bloom_value = Value::known(bloom_value);
 
@@ -247,7 +240,8 @@ impl<F: PrimeField + PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterC
                     let bloom_values: Vec<F> = hash_values
                         .iter()
                         .map(|i| {
-                            let bloom_value = bloom_filter_arrays[bloom_index][to_u32(i) as usize];
+                            let bloom_value =
+                                bloom_filter_arrays[(bloom_index, to_u32(i) as usize)];
                             if bloom_value {
                                 F::ONE
                             } else {
@@ -396,6 +390,7 @@ mod tests {
         },
         plonk::{Advice, Circuit, Column, Instance},
     };
+    use ndarray::{array, Array2};
 
     use super::{
         BloomFilterChip, BloomFilterChipConfig, BloomFilterConfig, BloomFilterInstructions,
@@ -405,7 +400,7 @@ mod tests {
     struct MyCircuit<F: PrimeField> {
         input: u64,
         bloom_index: u64,
-        bloom_filter_arrays: Vec<Vec<bool>>,
+        bloom_filter_arrays: Array2<bool>,
         _marker: PhantomData<F>,
     }
 
@@ -502,7 +497,7 @@ mod tests {
         let circuit = MyCircuit::<Fp> {
             input: 8,
             bloom_index: 0,
-            bloom_filter_arrays: vec![vec![true, false, true, false]],
+            bloom_filter_arrays: array![[true, false, true, false]],
             _marker: PhantomData,
         };
         let output = Fp::from(1);
@@ -517,7 +512,7 @@ mod tests {
         let circuit = MyCircuit::<Fp> {
             input: 8,
             bloom_index: 0,
-            bloom_filter_arrays: vec![vec![true, true, false, true]],
+            bloom_filter_arrays: array![[true, true, false, true]],
             _marker: PhantomData,
         };
         let output = Fp::from(0);
@@ -532,7 +527,7 @@ mod tests {
         let circuit = MyCircuit::<Fp> {
             input: 10,
             bloom_index: 0,
-            bloom_filter_arrays: vec![vec![false, false, true, false]],
+            bloom_filter_arrays: array![[false, false, true, false]],
             _marker: PhantomData,
         };
         let output = Fp::from(1);
@@ -547,7 +542,7 @@ mod tests {
         let circuit = MyCircuit::<Fp> {
             input: 10,
             bloom_index: 0,
-            bloom_filter_arrays: vec![vec![true, true, false, true]],
+            bloom_filter_arrays: array![[true, true, false, true]],
             _marker: PhantomData,
         };
         let output = Fp::from(0);
@@ -567,7 +562,7 @@ mod tests {
         let circuit = MyCircuit::<Fp> {
             input: 2,
             bloom_index: 0,
-            bloom_filter_arrays: vec![vec![true, false, false, true]],
+            bloom_filter_arrays: array![[true, false, false, true]],
             _marker: PhantomData,
         };
         halo2_proofs::dev::CircuitLayout::default()
