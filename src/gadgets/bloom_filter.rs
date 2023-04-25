@@ -550,7 +550,6 @@ mod tests {
         prover.assert_satisfied();
     }
 
-    #[cfg(feature = "dev-graph")]
     #[test]
     fn plot() {
         use plotters::prelude::*;

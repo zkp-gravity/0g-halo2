@@ -120,17 +120,20 @@ impl Wnn {
         let circuit: WnnCircuit<Fp, 2097143, 20, 2, 10> =
             WnnCircuit::new(hash_inputs, self.bloom_filters.clone());
 
-        let mut proved = false;
-        for k in 0..30 {
+        let mut k = 1;
+        loop {
             if let Ok(prover) = MockProver::run(k, &circuit, vec![outputs.clone()]) {
                 println!("Running mock proving with k = {k}");
                 prover.assert_satisfied();
-                proved = true;
                 break;
             }
+            k += 1;
+
+            if k > 30 {
+                panic!("Not possible to prove using 2^30 rows!");
+            }
         }
-        if proved {
-            println!("Valid!")
-        }
+        println!("Valid!");
+        circuit.plot("real_wnn_layout.png", k);
     }
 }

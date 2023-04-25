@@ -7,12 +7,9 @@ edition = "2021"
 name = "zero_g"
 path = "src/lib.rs"
 
-[features]
-dev-graph = ["halo2_proofs/dev-graph", "plotters"]
-
 [dependencies]
-plotters = { version = "0.3.0", optional = true }
-halo2_proofs = "0.3.0"
+plotters = { version = "0.3.0" }
+halo2_proofs = { version = "0.3.0", features = ["dev-graph"] }
 num-bigint = "0.4.3"
 hdf5 = "0.8.1"
 ndarray = "0.15.6"

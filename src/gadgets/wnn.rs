@@ -173,6 +173,18 @@ impl<
             _marker: PhantomData,
         }
     }
+
+    pub fn plot(&self, filename: &str, k: u32) {
+        use plotters::prelude::*;
+
+        let root = BitMapBackend::new(filename, (1024, 1024)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root.titled("Hash Chip Layout", ("sans-serif", 60)).unwrap();
+        halo2_proofs::dev::CircuitLayout::default()
+            .show_labels(true)
+            .render(k, self, &root)
+            .unwrap();
+    }
 }
 
 impl<
@@ -281,26 +293,16 @@ mod tests {
         prover.assert_satisfied();
     }
 
-    #[cfg(feature = "dev-graph")]
     #[test]
     fn plot() {
-        use plotters::prelude::*;
-
-        let root = BitMapBackend::new("wnn-layout.png", (1024, 1024)).into_drawing_area();
-        root.fill(&WHITE).unwrap();
-        let root = root.titled("Hash Chip Layout", ("sans-serif", 60)).unwrap();
-
-        let circuit = WnnCircuit::<Fp, 17, 4, 2, 2> {
+        WnnCircuit::<Fp, 17, 4, 2, 2> {
             inputs: vec![2, 7],
             bloom_filter_arrays: array![
                 [[true, false, true, false], [true, true, false, false],],
                 [[true, false, true, false], [true, true, false, true],],
             ],
             _marker: PhantomData,
-        };
-        halo2_proofs::dev::CircuitLayout::default()
-            .show_labels(true)
-            .render(6, &circuit, &root)
-            .unwrap();
+        }
+        .plot("wnn-layout.png", 6);
     }
 }
