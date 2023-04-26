@@ -1,7 +1,6 @@
 use std::marker::PhantomData;
 
 use crate::utils::{decompose_word, to_u32};
-use ff::PrimeField;
 /// Gadget that implements the bloom filter lookup:
 ///
 /// Given the `bloom_input`, `bloom_index`, `class_index` inputs, it:
@@ -10,13 +9,14 @@ use ff::PrimeField;
 /// - Performs a table lookup for each index
 /// - Returns 1 iff. all indices led to a positive lookup
 use halo2_proofs::{
+    arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector, TableColumn},
     poly::Rotation,
 };
 use ndarray::Array2;
 
-pub(crate) trait BloomFilterInstructions<F: PrimeField> {
+pub(crate) trait BloomFilterInstructions<F: FieldExt> {
     fn bloom_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -52,13 +52,13 @@ pub(crate) struct BloomFilterChipConfig {
     bloom_filter_config: BloomFilterConfig,
 }
 
-pub(crate) struct BloomFilterChip<F: PrimeField> {
+pub(crate) struct BloomFilterChip<F: FieldExt> {
     config: BloomFilterChipConfig,
     bloom_filter_arrays: Option<Array2<bool>>,
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> BloomFilterChip<F> {
+impl<F: FieldExt> BloomFilterChip<F> {
     pub(crate) fn construct(config: BloomFilterChipConfig) -> Self {
         BloomFilterChip {
             config,
@@ -196,7 +196,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
     }
 }
 
-impl<F: PrimeField> BloomFilterInstructions<F> for BloomFilterChip<F> {
+impl<F: FieldExt> BloomFilterInstructions<F> for BloomFilterChip<F> {
     fn bloom_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -381,8 +381,8 @@ impl<F: PrimeField> BloomFilterInstructions<F> for BloomFilterChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use ff::PrimeField;
     use halo2_proofs::{
+        arithmetic::FieldExt,
         circuit::{SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr as Fp,
@@ -395,7 +395,7 @@ mod tests {
     };
 
     #[derive(Default)]
-    struct MyCircuit<F: PrimeField> {
+    struct MyCircuit<F: FieldExt> {
         input: u64,
         bloom_index: u64,
         bloom_filter_arrays: Array2<bool>,
@@ -409,7 +409,7 @@ mod tests {
         instance: Column<Instance>,
     }
 
-    impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
+    impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
 

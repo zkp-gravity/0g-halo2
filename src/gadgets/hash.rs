@@ -1,16 +1,17 @@
-use std::marker::PhantomData;
-
-use ff::PrimeField;
-use halo2_proofs::{
+use halo2wrong::halo2::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Expression, Selector},
     poly::Rotation,
+};
+use halo2wrong::{
+    halo2::arithmetic::FieldExt, MainGate, MainGateConfig, RangeChip, RangeConfig,
+    RangeInstructions,
 };
 use num_bigint::BigUint;
 
 use crate::utils::integer_division;
 
-pub(crate) trait HashInstructions<F: PrimeField> {
+pub(crate) trait HashInstructions<F: FieldExt> {
     fn hash(&self, layouter: &mut impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error>;
 }
 
@@ -30,16 +31,21 @@ pub(crate) struct HashConfig {
     remainder: Column<Advice>,
     msb: Column<Advice>,
     hash: Column<Advice>,
+
+    main_gate_config: MainGateConfig,
+    range_config: RangeConfig,
+
     pub(crate) hash_function_config: HashFunctionConfig,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HashChip<F: PrimeField> {
+pub(crate) struct HashChip<F: FieldExt> {
     config: HashConfig,
-    _marker: PhantomData<F>,
+    main_gate: MainGate<F>,
+    range_chip: RangeChip<F>,
 }
 
-impl<F: PrimeField> HashChip<F> {
+impl<F: FieldExt> HashChip<F> {
     pub(crate) fn configure(
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
@@ -47,6 +53,8 @@ impl<F: PrimeField> HashChip<F> {
         remainder: Column<Advice>,
         msb: Column<Advice>,
         hash: Column<Advice>,
+        main_gate_config: MainGateConfig,
+        range_config: RangeConfig,
         hash_function_config: HashFunctionConfig,
     ) -> HashConfig {
         let selector = meta.selector();
@@ -84,19 +92,24 @@ impl<F: PrimeField> HashChip<F> {
             remainder,
             msb,
             hash,
+            main_gate_config,
+            range_config,
             hash_function_config,
         }
     }
 
     pub(crate) fn construct(config: HashConfig) -> Self {
+        let main_gate = MainGate::new(config.main_gate_config);
+        let range_chip = RangeChip::new(config.range_config);
         HashChip {
             config,
-            _marker: PhantomData,
+            main_gate,
+            range_chip,
         }
     }
 }
 
-impl<F: PrimeField> HashInstructions<F> for HashChip<F> {
+impl<F: FieldExt> HashInstructions<F> for HashChip<F> {
     fn hash(&self, layouter: &mut impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error> {
         layouter.assign_region(
             || "hash",
@@ -111,7 +124,10 @@ impl<F: PrimeField> HashInstructions<F> for HashChip<F> {
                     0,
                     || Value::known(input),
                 )?;
+
                 let input = input.value_field();
+                // TODO: Use correct bit length
+                self.range_chip.assign(&mut region, input, 8, 28)?;
                 let input_cubed = input * input * input;
                 let quotient = input_cubed.and_then(|input_cubed| {
                     Value::known(integer_division(input_cubed.evaluate(), BigUint::from(p)))
@@ -139,18 +155,19 @@ impl<F: PrimeField> HashInstructions<F> for HashChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use ff::PrimeField;
-    use halo2_proofs::{
-        circuit::SimpleFloorPlanner,
+    use halo2wrong::halo2::{
+        arithmetic::FieldExt,
+        circuit::{Layouter, SimpleFloorPlanner},
         dev::MockProver,
         halo2curves::bn256::Fr as Fp,
-        plonk::{Circuit, Column, Instance},
+        plonk::{Circuit, Column, Error, Instance},
     };
+    use halo2wrong::{halo2::plonk::ConstraintSystem, MainGate, RangeChip};
 
     use super::{HashChip, HashConfig, HashFunctionConfig, HashInstructions};
 
     #[derive(Default)]
-    struct MyCircuit<F: PrimeField> {
+    struct MyCircuit<F: FieldExt> {
         input: u64,
         _marker: PhantomData<F>,
     }
@@ -161,7 +178,7 @@ mod tests {
         instance: Column<Instance>,
     }
 
-    impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
+    impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
 
@@ -169,7 +186,11 @@ mod tests {
             Self::default()
         }
 
-        fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+            let main_gate_config = MainGate::configure(meta);
+            // TODO: Make dynamic, currently hard-coded for 28 bit
+            let range_config = RangeChip::configure(meta, &main_gate_config, vec![8], vec![4]);
+
             let input = meta.advice_column();
             let quotient = meta.advice_column();
             let remainder = meta.advice_column();
@@ -192,6 +213,8 @@ mod tests {
                     remainder,
                     msb,
                     hash,
+                    main_gate_config,
+                    range_config,
                     hash_function_config,
                 ),
                 instance,
@@ -201,8 +224,8 @@ mod tests {
         fn synthesize(
             &self,
             config: Self::Config,
-            mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-        ) -> Result<(), halo2_proofs::plonk::Error> {
+            mut layouter: impl Layouter<F>,
+        ) -> Result<(), Error> {
             let hash_chip = HashChip::construct(config.hash_config);
             let hash_value =
                 hash_chip.hash(&mut layouter.namespace(|| "hash"), F::from(self.input))?;
@@ -263,9 +286,9 @@ mod tests {
             input: 42,
             _marker: PhantomData,
         };
-        halo2_proofs::dev::CircuitLayout::default()
-            .show_labels(true)
-            .render(4, &circuit, &root)
-            .unwrap();
+        // halo2wrong::halo2::dev::CircuitLayout::default()
+        //     .show_labels(true)
+        //     .render(4, &circuit, &root)
+        //     .unwrap();
     }
 }

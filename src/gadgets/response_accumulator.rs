@@ -1,13 +1,13 @@
 use std::marker::PhantomData;
 
-use ff::PrimeField;
 use halo2_proofs::{
+    arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector},
     poly::Rotation,
 };
 
-pub(crate) trait ResponseAccumulatorInstructions<F: PrimeField> {
+pub(crate) trait ResponseAccumulatorInstructions<F: FieldExt> {
     fn accumulate_responses(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -22,12 +22,12 @@ pub(crate) struct ResponseAccumulatorChipConfig {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ResponseAccumulatorChip<F: PrimeField> {
+pub(crate) struct ResponseAccumulatorChip<F: FieldExt> {
     config: ResponseAccumulatorChipConfig,
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> ResponseAccumulatorChip<F> {
+impl<F: FieldExt> ResponseAccumulatorChip<F> {
     pub(crate) fn construct(config: ResponseAccumulatorChipConfig) -> Self {
         Self {
             config,
@@ -62,7 +62,7 @@ impl<F: PrimeField> ResponseAccumulatorChip<F> {
     }
 }
 
-impl<F: PrimeField> ResponseAccumulatorInstructions<F> for ResponseAccumulatorChip<F> {
+impl<F: FieldExt> ResponseAccumulatorInstructions<F> for ResponseAccumulatorChip<F> {
     fn accumulate_responses(
         &self,
         layouter: &mut impl Layouter<F>,

@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
-use ff::PrimeField;
 use halo2_proofs::{
+    arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
 };
@@ -19,7 +19,7 @@ use crate::gadgets::{
     response_accumulator::{ResponseAccumulatorChip, ResponseAccumulatorChipConfig},
 };
 
-pub(crate) trait WnnInstructions<F: PrimeField> {
+pub(crate) trait WnnInstructions<F: FieldExt> {
     fn predict(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -41,12 +41,12 @@ pub struct WnnChipConfig {
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
 }
 
-struct WnnChip<F: PrimeField> {
+struct WnnChip<F: FieldExt> {
     config: WnnChipConfig,
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> WnnChip<F> {
+impl<F: FieldExt> WnnChip<F> {
     fn construct(config: WnnChipConfig) -> Self {
         WnnChip {
             config,
@@ -87,7 +87,7 @@ impl<F: PrimeField> WnnChip<F> {
     }
 }
 
-impl<F: PrimeField> WnnInstructions<F> for WnnChip<F> {
+impl<F: FieldExt> WnnInstructions<F> for WnnChip<F> {
     fn predict(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -147,7 +147,7 @@ pub struct WnnCircuitConfig {
 }
 
 pub struct WnnCircuit<
-    F: PrimeField,
+    F: FieldExt,
     const P: u64,
     const L: usize,
     const N_HASHES: usize,
@@ -159,7 +159,7 @@ pub struct WnnCircuit<
 }
 
 impl<
-        F: PrimeField,
+        F: FieldExt,
         const P: u64,
         const L: usize,
         const N_HASHES: usize,
@@ -188,7 +188,7 @@ impl<
 }
 
 impl<
-        F: PrimeField,
+        F: FieldExt,
         const P: u64,
         const L: usize,
         const N_HASHES: usize,
