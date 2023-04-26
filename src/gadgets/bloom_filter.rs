@@ -8,7 +8,7 @@ use crate::utils::{decompose_word, to_u32};
 /// - Decomposes the hash into `n_lookup` indices of length `l / n_lookup`
 /// - Performs a table lookup for each index
 /// - Returns 1 iff. all indices led to a positive lookup
-use halo2_proofs::{
+use halo2wrong::halo2::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector, TableColumn},
@@ -381,12 +381,12 @@ impl<F: FieldExt> BloomFilterInstructions<F> for BloomFilterChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use halo2_proofs::{
+    use halo2wrong::halo2::{
         arithmetic::FieldExt,
-        circuit::{SimpleFloorPlanner, Value},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr as Fp,
-        plonk::{Advice, Circuit, Column, Instance},
+        plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
     };
     use ndarray::{array, Array2};
 
@@ -417,7 +417,7 @@ mod tests {
             Self::default()
         }
 
-        fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let instance = meta.instance_column();
 
             let advice_columns = [
@@ -460,8 +460,8 @@ mod tests {
         fn synthesize(
             &self,
             config: Self::Config,
-            mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-        ) -> Result<(), halo2_proofs::plonk::Error> {
+            mut layouter: impl Layouter<F>,
+        ) -> Result<(), Error> {
             let input_cell = layouter.assign_region(
                 || "input",
                 |mut region| {
@@ -562,9 +562,9 @@ mod tests {
             bloom_filter_arrays: array![[true, false, false, true]],
             _marker: PhantomData,
         };
-        halo2_proofs::dev::CircuitLayout::default()
-            .show_labels(true)
-            .render(4, &circuit, &root)
-            .unwrap();
+        // halo2_proofs::dev::CircuitLayout::default()
+        //     .show_labels(true)
+        //     .render(4, &circuit, &root)
+        //     .unwrap();
     }
 }

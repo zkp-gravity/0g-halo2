@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::{
+use halo2wrong::halo2::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector},
@@ -78,7 +78,7 @@ impl<F: FieldExt> ResponseAccumulatorInstructions<F> for ResponseAccumulatorChip
                     .map(|row| {
                         row.iter()
                             .map(|cell| cell.value())
-                            .fold(Value::known(F::ZERO), |acc, v| acc + v)
+                            .fold(Value::known(F::from(0u64)), |acc, v| acc + v)
                     })
                     .collect::<Vec<_>>();
 
@@ -86,9 +86,9 @@ impl<F: FieldExt> ResponseAccumulatorInstructions<F> for ResponseAccumulatorChip
                     || "acc 0",
                     self.config.advice_columns[4],
                     0,
-                    F::ZERO,
+                    F::from(0u64),
                 )?;
-                let mut current_acc_value = Value::known(F::ZERO);
+                let mut current_acc_value = Value::known(F::from(0u64));
                 for row_index in 0..n_rows {
                     self.config.selector.enable(&mut region, row_index)?;
                     for i in 0..4 {
@@ -105,7 +105,7 @@ impl<F: FieldExt> ResponseAccumulatorInstructions<F> for ResponseAccumulatorChip
                                 || "dummy response",
                                 self.config.advice_columns[i],
                                 row_index,
-                                F::ZERO,
+                                F::from(0u64),
                             )?;
                         }
                     }

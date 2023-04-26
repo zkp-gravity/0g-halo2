@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_proofs::{
+use halo2wrong::halo2::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
@@ -180,10 +180,10 @@ impl<
         let root = BitMapBackend::new(filename, (1024, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root.titled("Hash Chip Layout", ("sans-serif", 60)).unwrap();
-        halo2_proofs::dev::CircuitLayout::default()
-            .show_labels(true)
-            .render(k, self, &root)
-            .unwrap();
+        // halo2_proofs::dev::CircuitLayout::default()
+        //     .show_labels(true)
+        //     .render(k, self, &root)
+        //     .unwrap();
     }
 }
 
@@ -206,7 +206,7 @@ impl<
         }
     }
 
-    fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let instance_column = meta.instance_column();
 
         let advice_columns = [
@@ -243,8 +243,8 @@ impl<
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-    ) -> Result<(), halo2_proofs::plonk::Error> {
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), Error> {
         let wnn_chip = WnnChip::construct(config.wnn_chip_config);
 
         let result = wnn_chip.predict(
@@ -265,8 +265,8 @@ impl<
 mod tests {
     use std::marker::PhantomData;
 
-    use halo2_proofs::dev::MockProver;
-    use halo2_proofs::halo2curves::bn256::Fr as Fp;
+    use halo2wrong::halo2::dev::MockProver;
+    use halo2wrong::halo2::halo2curves::bn256::Fr as Fp;
     use ndarray::array;
 
     use super::WnnCircuit;
