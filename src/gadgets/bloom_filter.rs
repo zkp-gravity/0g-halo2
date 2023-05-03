@@ -11,7 +11,9 @@ use ff::PrimeField;
 /// - Returns 1 iff. all indices led to a positive lookup
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
-    plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector, TableColumn},
+    plonk::{
+        Advice, Column, ConstraintSystem, Constraints, Error, Expression, Selector, TableColumn,
+    },
     poly::Rotation,
 };
 use ndarray::Array2;
@@ -47,6 +49,7 @@ pub(crate) struct BloomFilterChipConfig {
     validate_bloom_accumulators_selector: Selector,
 
     table_bloom_index: TableColumn,
+    table_bloom_i: TableColumn,
     table_bloom_value: TableColumn,
 
     bloom_filter_config: BloomFilterConfig,
@@ -102,18 +105,28 @@ impl<F: PrimeField> BloomFilterChip<F> {
         });
 
         let table_bloom_index = meta.lookup_table_column();
+        let table_bloom_i = meta.lookup_table_column();
         let table_bloom_value = meta.lookup_table_column();
         let bloom_filter_lookup_selector = meta.complex_selector();
         meta.lookup("bloom filter lookup", |meta| {
             let selector = meta.query_selector(bloom_filter_lookup_selector);
 
             let bloom_index = meta.query_advice(bloom_index, Rotation::cur());
+            let bloom_i = meta.query_advice(hashes, Rotation::cur());
             let bloom_value = meta.query_advice(bloom_value, Rotation::cur());
 
-            // TODO: Handle selector=0 case
+            let default_value = Expression::Constant(-F::ONE);
+            let one = Expression::Constant(F::ONE);
+
+            // Whenever the selector is inactive, we look up the tuple (-1, -1, -1), which is added to the table for this purpose
+            let with_default = |x: Expression<F>| {
+                selector.clone() * x + (one.clone() - selector.clone()) * default_value.clone()
+            };
+
             vec![
-                (selector.clone() * bloom_index, table_bloom_index),
-                (selector * bloom_value, table_bloom_value),
+                (with_default(bloom_index), table_bloom_index),
+                (with_default(bloom_i), table_bloom_i),
+                (with_default(bloom_value), table_bloom_value),
             ]
         });
 
@@ -144,6 +157,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
 
             // Table Columns
             table_bloom_index,
+            table_bloom_i,
             table_bloom_value,
 
             bloom_filter_config,
@@ -177,6 +191,13 @@ impl<F: PrimeField> BloomFilterChip<F> {
                         )?;
 
                         table.assign_cell(
+                            || "bloom_i",
+                            self.config.table_bloom_i,
+                            offset,
+                            || Value::known(F::from(i as u64)),
+                        )?;
+
+                        table.assign_cell(
                             || "bloom_value",
                             self.config.table_bloom_value,
                             offset,
@@ -186,6 +207,26 @@ impl<F: PrimeField> BloomFilterChip<F> {
                         offset += 1;
                     }
                 }
+
+                // Set default tuple of (-1, -1, -1)
+                table.assign_cell(
+                    || "bloom_index (default)",
+                    self.config.table_bloom_index,
+                    offset,
+                    || Value::known(-F::ONE),
+                )?;
+                table.assign_cell(
+                    || "bloom_i (default)",
+                    self.config.table_bloom_i,
+                    offset,
+                    || Value::known(-F::ONE),
+                )?;
+                table.assign_cell(
+                    || "bloom_value (default)",
+                    self.config.table_bloom_value,
+                    offset,
+                    || Value::known(-F::ONE),
+                )?;
 
                 Ok(())
             },
