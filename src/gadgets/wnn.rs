@@ -237,7 +237,7 @@ impl<
 
         let bloom_filter_config = BloomFilterConfig {
             n_hashes: N_HASHES,
-            bits_per_hash: BITS_PER_FILTER,
+            bits_per_filter: BITS_PER_FILTER,
         };
         let hash_function_config = HashFunctionConfig {
             p: P,

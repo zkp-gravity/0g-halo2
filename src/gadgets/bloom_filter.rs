@@ -29,8 +29,8 @@ pub(crate) trait BloomFilterInstructions<F: PrimeField> {
 pub(crate) struct BloomFilterConfig {
     /// Number of hashes per bloom filter
     pub(crate) n_hashes: usize,
-
-    pub(crate) bits_per_hash: usize,
+    /// Each bloom filter is expected to have 2^bits_per_filter entries
+    pub(crate) bits_per_filter: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -77,7 +77,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
         bloom_accumulator: Column<Advice>,
         bloom_filter_config: BloomFilterConfig,
     ) -> BloomFilterChipConfig {
-        assert!(bloom_filter_config.bits_per_hash < 64);
+        assert!(bloom_filter_config.bits_per_filter < 64);
 
         let validate_hash_accumulators_selector = meta.selector();
         meta.create_gate("validate_hash_accumulators", |meta| {
@@ -87,7 +87,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
             let acc_cur = meta.query_advice(hash_accumulator, Rotation::cur());
             let acc_next = meta.query_advice(hash_accumulator, Rotation::next());
 
-            let shift_multiplier = F::from(1 << bloom_filter_config.bits_per_hash);
+            let shift_multiplier = F::from(1 << bloom_filter_config.bits_per_filter);
             Constraints::with_selector(selector, vec![acc_cur * shift_multiplier + hash - acc_next])
         });
 
@@ -155,7 +155,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
         layouter: &mut impl Layouter<F>,
         bloom_filter_arrays: Array2<bool>,
     ) -> Result<(), Error> {
-        let bloom_filter_length = 1 << self.config.bloom_filter_config.bits_per_hash;
+        let bloom_filter_length = 1 << self.config.bloom_filter_config.bits_per_filter;
         assert_eq!(bloom_filter_arrays.shape()[1], bloom_filter_length);
 
         layouter.assign_table(
@@ -217,14 +217,15 @@ impl<F: PrimeField> BloomFilterInstructions<F> for BloomFilterChip<F> {
                     let mut words = decompose_word(
                         hash_value,
                         self.config.bloom_filter_config.n_hashes,
-                        self.config.bloom_filter_config.bits_per_hash,
+                        self.config.bloom_filter_config.bits_per_filter,
                     );
                     // Accumulator has to start with most significant word
                     // Otherwise, the order doesn't matter, because a all results ANDed together anyway.
                     words.reverse();
                     words
                 });
-                let shift_multiplier = F::from(1 << self.config.bloom_filter_config.bits_per_hash);
+                let shift_multiplier =
+                    F::from(1 << self.config.bloom_filter_config.bits_per_filter);
                 let hash_accumulators = hash_values
                     .clone()
                     .map(|hash_values| {
@@ -438,7 +439,7 @@ mod tests {
 
             let bloom_filter_config = BloomFilterConfig {
                 n_hashes: 2,
-                bits_per_hash: 2,
+                bits_per_filter: 2,
             };
             let bloom_filter_chip_config = BloomFilterChip::configure(
                 meta,
