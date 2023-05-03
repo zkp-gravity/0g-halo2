@@ -1,6 +1,4 @@
-use std::marker::PhantomData;
-
-use ff::PrimeField;
+use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Expression, Selector},
@@ -10,8 +8,10 @@ use num_bigint::BigUint;
 
 use crate::utils::integer_division;
 
-pub(crate) trait HashInstructions<F: PrimeField> {
-    fn hash(&self, layouter: &mut impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error>;
+use super::range_check::{range_check, RangeCheckConfig};
+
+pub(crate) trait HashInstructions<F: PrimeFieldBits> {
+    fn hash(&self, layouter: impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error>;
 }
 
 #[derive(Debug, Clone)]
@@ -20,26 +20,28 @@ pub(crate) struct HashFunctionConfig {
     pub(crate) p: u64,
     /// number of bits for the hash function output
     pub(crate) l: usize,
+    /// Number of input bits
+    pub(crate) n_bits: usize,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HashConfig {
+pub(crate) struct HashConfig<F: PrimeFieldBits> {
     selector: Selector,
     input: Column<Advice>,
     quotient: Column<Advice>,
     remainder: Column<Advice>,
     msb: Column<Advice>,
     hash: Column<Advice>,
+    range_check_config: RangeCheckConfig<F>,
     pub(crate) hash_function_config: HashFunctionConfig,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HashChip<F: PrimeField> {
-    config: HashConfig,
-    _marker: PhantomData<F>,
+pub(crate) struct HashChip<F: PrimeFieldBits> {
+    config: HashConfig<F>,
 }
 
-impl<F: PrimeField> HashChip<F> {
+impl<F: PrimeFieldBits> HashChip<F> {
     pub(crate) fn configure(
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
@@ -47,8 +49,9 @@ impl<F: PrimeField> HashChip<F> {
         remainder: Column<Advice>,
         msb: Column<Advice>,
         hash: Column<Advice>,
+        range_check_config: RangeCheckConfig<F>,
         hash_function_config: HashFunctionConfig,
-    ) -> HashConfig {
+    ) -> HashConfig<F> {
         let selector = meta.selector();
 
         meta.create_gate("hash", |meta| {
@@ -84,34 +87,34 @@ impl<F: PrimeField> HashChip<F> {
             remainder,
             msb,
             hash,
+            range_check_config,
             hash_function_config,
         }
     }
 
-    pub(crate) fn construct(config: HashConfig) -> Self {
-        HashChip {
-            config,
-            _marker: PhantomData,
+    pub(crate) fn construct(config: HashConfig<F>) -> Self {
+        if (config.hash_function_config.n_bits * 3) as u32 > F::CAPACITY {
+            panic!("Field too small to store x^3!");
         }
+        HashChip { config }
     }
 }
 
-impl<F: PrimeField> HashInstructions<F> for HashChip<F> {
-    fn hash(&self, layouter: &mut impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error> {
-        layouter.assign_region(
+impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
+    fn hash(&self, mut layouter: impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error> {
+        let HashFunctionConfig { p, l, n_bits } = self.config.hash_function_config;
+        let (input, output) = layouter.namespace(|| "hash").assign_region(
             || "hash",
             |mut region| {
                 self.config.selector.enable(&mut region, 0)?;
 
-                let HashFunctionConfig { p, l } = self.config.hash_function_config;
-
-                let input = region.assign_advice(
+                let input_cell = region.assign_advice(
                     || "input",
                     self.config.input,
                     0,
                     || Value::known(input),
                 )?;
-                let input = input.value_field();
+                let input = input_cell.value_field();
                 let input_cubed = input * input * input;
                 let quotient = input_cubed.and_then(|input_cubed| {
                     Value::known(integer_division(input_cubed.evaluate(), BigUint::from(p)))
@@ -129,9 +132,14 @@ impl<F: PrimeField> HashInstructions<F> for HashChip<F> {
                 region.assign_advice(|| "quotient", self.config.quotient, 0, || quotient)?;
                 region.assign_advice(|| "remainder", self.config.remainder, 0, || remainder)?;
                 region.assign_advice(|| "msb", self.config.msb, 0, || msb)?;
-                region.assign_advice(|| "hash", self.config.hash, 0, || hash.evaluate())
+                let output =
+                    region.assign_advice(|| "hash", self.config.hash, 0, || hash.evaluate())?;
+                Ok((input_cell, output))
             },
-        )
+        )?;
+        range_check(layouter, self.config.range_check_config, input, n_bits)?;
+
+        Ok(output)
     }
 }
 
@@ -139,30 +147,34 @@ impl<F: PrimeField> HashInstructions<F> for HashChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use ff::PrimeField;
+    use ff::PrimeFieldBits;
+    use halo2_gadgets::utilities::lookup_range_check::LookupRangeCheckConfig;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
         dev::MockProver,
-        halo2curves::bn256::Fr as Fp,
-        plonk::{Circuit, Column, Instance},
+        halo2curves::pasta::pallas::Base as Fp,
+        plonk::{Circuit, Column, Instance, TableColumn},
     };
+
+    use crate::gadgets::range_check::load_range_check_lookup_table;
 
     use super::{HashChip, HashConfig, HashFunctionConfig, HashInstructions};
 
     #[derive(Default)]
-    struct MyCircuit<F: PrimeField> {
+    struct MyCircuit<F: PrimeFieldBits> {
         input: u64,
         _marker: PhantomData<F>,
     }
 
     #[derive(Clone, Debug)]
-    struct Config {
-        hash_config: HashConfig,
+    struct Config<F: PrimeFieldBits> {
+        hash_config: HashConfig<F>,
+        table_column: TableColumn,
         instance: Column<Instance>,
     }
 
-    impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
-        type Config = Config;
+    impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
+        type Config = Config<F>;
         type FloorPlanner = SimpleFloorPlanner;
 
         fn without_witnesses(&self) -> Self {
@@ -176,13 +188,24 @@ mod tests {
             let msb = meta.advice_column();
             let hash = meta.advice_column();
 
+            let constants = meta.fixed_column();
+            meta.enable_constant(constants);
+
             let instance = meta.instance_column();
 
             meta.enable_equality(instance);
             meta.enable_equality(input);
             meta.enable_equality(hash);
 
-            let hash_function_config = HashFunctionConfig { p: 11, l: 3 };
+            let hash_function_config = HashFunctionConfig {
+                p: 11,
+                l: 3,
+                n_bits: 8,
+            };
+
+            let table_column = meta.lookup_table_column();
+            // Reuse input column
+            let lookup_range_check = LookupRangeCheckConfig::configure(meta, input, table_column);
 
             Config {
                 hash_config: HashChip::configure(
@@ -192,8 +215,10 @@ mod tests {
                     remainder,
                     msb,
                     hash,
+                    lookup_range_check,
                     hash_function_config,
                 ),
+                table_column,
                 instance,
             }
         }
@@ -203,9 +228,9 @@ mod tests {
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
         ) -> Result<(), halo2_proofs::plonk::Error> {
+            load_range_check_lookup_table(&mut layouter, config.table_column)?;
             let hash_chip = HashChip::construct(config.hash_config);
-            let hash_value =
-                hash_chip.hash(&mut layouter.namespace(|| "hash"), F::from(self.input))?;
+            let hash_value = hash_chip.hash(layouter.namespace(|| "hash"), F::from(self.input))?;
 
             layouter.constrain_instance(hash_value.cell(), config.instance, 0)?;
             Ok(())
@@ -214,7 +239,7 @@ mod tests {
 
     #[test]
     fn test_2() {
-        let k = 4;
+        let k = 9;
         let circuit = MyCircuit::<Fp> {
             input: 2,
             _marker: PhantomData,
@@ -227,7 +252,7 @@ mod tests {
 
     #[test]
     fn test_4() {
-        let k = 4;
+        let k = 9;
         let circuit = MyCircuit::<Fp> {
             input: 4,
             _marker: PhantomData,
@@ -240,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_42() {
-        let k = 4;
+        let k = 9;
         let circuit = MyCircuit::<Fp> {
             input: 42,
             _marker: PhantomData,
@@ -249,6 +274,31 @@ mod tests {
         let output = Fp::from(3);
         let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
         prover.assert_satisfied();
+    }
+
+    #[test]
+    fn test_255() {
+        let k = 9;
+        let circuit = MyCircuit::<Fp> {
+            input: 255,
+            _marker: PhantomData,
+        };
+        // (255^3 % 11) % 8 = 0
+        let output = Fp::from(0);
+        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
+        prover.assert_satisfied();
+    }
+
+    #[test]
+    fn test_256_too_large() {
+        let k = 9;
+        let circuit = MyCircuit::<Fp> {
+            input: 256,
+            _marker: PhantomData,
+        };
+        let output = Fp::from(0);
+        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
+        assert!(prover.verify().is_err());
     }
 
     #[test]

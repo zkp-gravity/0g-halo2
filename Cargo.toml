@@ -9,9 +9,11 @@ path = "src/lib.rs"
 
 [dependencies]
 plotters = { version = "0.3.0" }
-halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2023_04_20", features = ["dev-graph"] }
+halo2_proofs = { package="halo2_proofs", git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2023_04_20", features = ["dev-graph"] }
+halo2_gadgets = { package="halo2_gadgets", git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2023_04_20" }
 num-bigint = "0.4.3"
 hdf5 = "0.8.1"
 ndarray = "0.15.6"
 ff = "0.13.0"
 rand_core = "0.6.4"
+divrem = "1.0.0"
