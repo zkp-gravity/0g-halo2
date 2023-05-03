@@ -157,6 +157,7 @@ pub struct WnnCircuit<
     const L: usize,
     const N_HASHES: usize,
     const BITS_PER_HASH: usize,
+    const BITS_PER_FILTER: usize,
 > {
     inputs: Vec<u64>,
     bloom_filter_arrays: Array3<bool>,
@@ -169,7 +170,8 @@ impl<
         const L: usize,
         const N_HASHES: usize,
         const BITS_PER_HASH: usize,
-    > WnnCircuit<F, P, L, N_HASHES, BITS_PER_HASH>
+        const BITS_PER_FILTER: usize,
+    > WnnCircuit<F, P, L, N_HASHES, BITS_PER_HASH, BITS_PER_FILTER>
 {
     pub fn new(inputs: Vec<u64>, bloom_filter_arrays: Array3<bool>) -> Self {
         Self {
@@ -182,7 +184,7 @@ impl<
     pub fn plot(&self, filename: &str, k: u32) {
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new(filename, (1024, 102400)).into_drawing_area();
+        let root = BitMapBackend::new(filename, (1024, 1 << (k + 4))).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root.titled("Hash Chip Layout", ("sans-serif", 60)).unwrap();
         halo2_proofs::dev::CircuitLayout::default()
@@ -198,7 +200,8 @@ impl<
         const L: usize,
         const N_HASHES: usize,
         const BITS_PER_HASH: usize,
-    > Circuit<F> for WnnCircuit<F, P, L, N_HASHES, BITS_PER_HASH>
+        const BITS_PER_FILTER: usize,
+    > Circuit<F> for WnnCircuit<F, P, L, N_HASHES, BITS_PER_HASH, BITS_PER_FILTER>
 {
     type Config = WnnCircuitConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
@@ -234,7 +237,7 @@ impl<
 
         let bloom_filter_config = BloomFilterConfig {
             n_hashes: N_HASHES,
-            bits_per_hash: BITS_PER_HASH,
+            bits_per_hash: BITS_PER_FILTER,
         };
         let hash_function_config = HashFunctionConfig {
             p: P,
@@ -292,7 +295,7 @@ mod tests {
     #[test]
     fn test() {
         let k = 9;
-        let circuit = WnnCircuit::<Fp, 17, 4, 2, 2> {
+        let circuit = WnnCircuit::<Fp, 17, 4, 2, 3, 2> {
             inputs: vec![2, 7],
             bloom_filter_arrays: array![
                 [[true, false, true, false], [true, true, false, false],],
@@ -314,7 +317,7 @@ mod tests {
 
     #[test]
     fn plot() {
-        WnnCircuit::<Fp, 17, 4, 2, 2> {
+        WnnCircuit::<Fp, 17, 4, 2, 3, 2> {
             inputs: vec![2, 7],
             bloom_filter_arrays: array![
                 [[true, false, true, false], [true, true, false, false],],

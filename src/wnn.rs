@@ -1,15 +1,18 @@
-// use std::time::Instant;
-
 use halo2_proofs::dev::MockProver;
 use ndarray::{Array1, Array3};
 
 use halo2_proofs::halo2curves::pasta::pallas::Base as Fp;
 use num_bigint::BigUint;
-// use rand_core::OsRng;
 
 use crate::gadgets::wnn::WnnCircuit;
 
-pub struct Wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: usize> {
+pub struct Wnn<
+    const P: u64,
+    const L: usize,
+    const N_HASHES: usize,
+    const BITS_PER_HASH: usize,
+    const BITS_PER_FILTER: usize,
+> {
     num_classes: usize,
     num_filter_entries: usize,
     num_filter_hashes: usize,
@@ -21,8 +24,13 @@ pub struct Wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_P
     input_order: Array1<u64>,
 }
 
-impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: usize>
-    Wnn<P, L, N_HASHES, BITS_PER_HASH>
+impl<
+        const P: u64,
+        const L: usize,
+        const N_HASHES: usize,
+        const BITS_PER_HASH: usize,
+        const BITS_PER_FILTER: usize,
+    > Wnn<P, L, N_HASHES, BITS_PER_HASH, BITS_PER_FILTER>
 {
     pub fn new(
         num_classes: usize,
@@ -112,9 +120,12 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
             .collect::<Vec<_>>()
     }
 
-    fn get_circuit(&self, hash_inputs: Vec<u64>) -> WnnCircuit<Fp, P, L, N_HASHES, BITS_PER_HASH> {
+    fn get_circuit(
+        &self,
+        hash_inputs: Vec<u64>,
+    ) -> WnnCircuit<Fp, P, L, N_HASHES, BITS_PER_HASH, BITS_PER_FILTER> {
         assert_eq!(self.p, P);
-        assert_eq!(self.num_filter_entries, 1 << BITS_PER_HASH);
+        assert_eq!(self.num_filter_entries, 1 << BITS_PER_FILTER);
         assert_eq!(self.num_filter_hashes, N_HASHES);
         WnnCircuit::new(hash_inputs, self.bloom_filters.clone())
     }
@@ -129,12 +140,12 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
 
         let circuit = self.get_circuit(hash_inputs);
 
-        // let prover = MockProver::run(k, &circuit, vec![outputs.clone()]).unwrap();
-        // prover.assert_satisfied();
+        let prover = MockProver::run(k, &circuit, vec![outputs.clone()]).unwrap();
+        prover.assert_satisfied();
 
         println!("Valid!");
         // Plot with smaller k. This won't fit the bloom filter table but everything else will be readable
-        circuit.plot("real_wnn_layout.png", 12);
+        circuit.plot("real_wnn_layout.png", 11);
     }
 
     pub fn proof_and_verify(&self, _input_bits: Vec<bool>, _k: u32) {

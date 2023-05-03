@@ -103,41 +103,75 @@ impl<F: PrimeFieldBits> HashChip<F> {
 impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
     fn hash(&self, mut layouter: impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error> {
         let HashFunctionConfig { p, l, n_bits } = self.config.hash_function_config;
-        let (input, output) = layouter.namespace(|| "hash").assign_region(
-            || "hash",
-            |mut region| {
-                self.config.selector.enable(&mut region, 0)?;
+        let (input, quotient, _remainder, msb, output) =
+            layouter.namespace(|| "hash").assign_region(
+                || "hash",
+                |mut region| {
+                    self.config.selector.enable(&mut region, 0)?;
 
-                let input_cell = region.assign_advice(
-                    || "input",
-                    self.config.input,
-                    0,
-                    || Value::known(input),
-                )?;
-                let input = input_cell.value_field();
-                let input_cubed = input * input * input;
-                let quotient = input_cubed.and_then(|input_cubed| {
-                    Value::known(integer_division(input_cubed.evaluate(), BigUint::from(p)))
-                });
-                let remainder = input_cubed - quotient * Value::known(F::from(p));
+                    let input_cell = region.assign_advice(
+                        || "input",
+                        self.config.input,
+                        0,
+                        || Value::known(input),
+                    )?;
+                    let input = input_cell.value_field();
+                    let input_cubed = input * input * input;
+                    let quotient = input_cubed.and_then(|input_cubed| {
+                        Value::known(integer_division(input_cubed.evaluate(), BigUint::from(p)))
+                    });
+                    let remainder = input_cubed - quotient * Value::known(F::from(p));
 
-                let msb = remainder.and_then(|remainder| {
-                    Value::known(integer_division(
-                        remainder.evaluate(),
-                        BigUint::from(1u8) << l,
-                    ))
-                });
-                let hash = remainder - msb * Value::known(F::from(1 << l));
+                    let msb = remainder.and_then(|remainder| {
+                        Value::known(integer_division(
+                            remainder.evaluate(),
+                            BigUint::from(1u8) << l,
+                        ))
+                    });
+                    let hash = remainder - msb * Value::known(F::from(1 << l));
 
-                region.assign_advice(|| "quotient", self.config.quotient, 0, || quotient)?;
-                region.assign_advice(|| "remainder", self.config.remainder, 0, || remainder)?;
-                region.assign_advice(|| "msb", self.config.msb, 0, || msb)?;
-                let output =
-                    region.assign_advice(|| "hash", self.config.hash, 0, || hash.evaluate())?;
-                Ok((input_cell, output))
-            },
+                    let quotient = region.assign_advice(
+                        || "quotient",
+                        self.config.quotient,
+                        0,
+                        || quotient,
+                    )?;
+                    let remainder = region.assign_advice(
+                        || "remainder",
+                        self.config.remainder,
+                        0,
+                        || remainder,
+                    )?;
+                    let msb = region.assign_advice(|| "msb", self.config.msb, 0, || msb)?;
+                    let output =
+                        region.assign_advice(|| "hash", self.config.hash, 0, || hash.evaluate())?;
+                    Ok((input_cell, quotient, remainder, msb, output))
+                },
+            )?;
+
+        // Check that all cells have the right number of bits, with two exceptions:
+        // - output should be l bits, but it's later decomposed and used in a table lookup, which enforces the range
+        // - remainder should be l + 1 bits, but does not need to be range-checked, because we verify that r = 2^l * msb + output
+        range_check(
+            layouter.namespace(|| "range check input"),
+            self.config.range_check_config,
+            input,
+            n_bits,
         )?;
-        range_check(layouter, self.config.range_check_config, input, n_bits)?;
+        range_check(
+            layouter.namespace(|| "range check quotient"),
+            self.config.range_check_config,
+            quotient,
+            n_bits * 3 - l,
+        )?;
+        range_check(
+            layouter.namespace(|| "range check msb"),
+            self.config.range_check_config,
+            msb,
+            1,
+        )?;
+
+        // TODO: Check that remainder < p!
 
         Ok(output)
     }
@@ -195,6 +229,9 @@ mod tests {
 
             meta.enable_equality(instance);
             meta.enable_equality(input);
+            meta.enable_equality(quotient);
+            meta.enable_equality(remainder);
+            meta.enable_equality(msb);
             meta.enable_equality(hash);
 
             let hash_function_config = HashFunctionConfig {
@@ -315,7 +352,7 @@ mod tests {
         };
         halo2_proofs::dev::CircuitLayout::default()
             .show_labels(true)
-            .render(4, &circuit, &root)
+            .render(5, &circuit, &root)
             .unwrap();
     }
 }
