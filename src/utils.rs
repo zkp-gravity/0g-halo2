@@ -14,6 +14,18 @@ pub(crate) fn print_values<F: PrimeField>(name: &str, values: &Vec<Value<F>>) {
     });
 }
 
+pub fn argmax(vec: &Vec<u32>) -> usize {
+    let mut index = 0;
+    let mut max = 0;
+    for (i, x) in vec.iter().enumerate() {
+        if *x > max {
+            max = *x;
+            index = i;
+        }
+    }
+    index
+}
+
 pub(crate) fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
     let x_bigint = BigUint::from_bytes_le(x.to_repr().as_ref());
     let quotient = x_bigint / divisor;

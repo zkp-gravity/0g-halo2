@@ -1,4 +1,4 @@
 mod gadgets;
-mod utils;
-pub mod wnn;
 pub mod io;
+pub mod utils;
+pub mod wnn;

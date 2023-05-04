@@ -15,7 +15,7 @@ use halo2_proofs::{
         Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
     },
 };
-use ndarray::{Array1, Array3};
+use ndarray::{Array1, Array2, Array3};
 
 use halo2_proofs::halo2curves::bn256::{Bn256, Fr as Fp, G1Affine};
 use num_bigint::BigUint;
@@ -33,6 +33,8 @@ pub struct Wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_P
     /// Bloom filter array, shape (num_classes, num_inputs * bits_per_input / num_filter_inputs, num_filter_entries)
     bloom_filters: Array3<bool>,
     input_order: Array1<u64>,
+    /// Thresholds for pixels, shape (width, height, bits_per_input)
+    binarization_thresholds: Array3<f32>,
 }
 
 impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: usize>
@@ -47,6 +49,7 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
 
         bloom_filters: Array3<bool>,
         input_order: Array1<u64>,
+        binarization_thresholds: Array3<f32>,
     ) -> Self {
         Self {
             num_classes,
@@ -56,11 +59,29 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
             p,
             bloom_filters,
             input_order,
+            binarization_thresholds,
         }
     }
 
     pub fn num_input_bits(&self) -> usize {
         self.input_order.len()
+    }
+
+    pub fn encode_image(&self, image: &Array2<u8>) -> Vec<bool> {
+        let (width, height) = (image.shape()[0], image.shape()[1]);
+
+        let mut image_bits = vec![];
+
+        for b in 0..self.binarization_thresholds.shape()[2] {
+            for i in 0..width {
+                for j in 0..height {
+                    image_bits
+                        .push(image[(i, j)] as f32 >= self.binarization_thresholds[(i, j, b)]);
+                }
+            }
+        }
+
+        image_bits
     }
 
     fn mish_mash_hash(&self, x: u64) -> BigUint {
@@ -80,13 +101,20 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
             .collect();
 
         // Pack inputs into integers of `num_filter_inputs` bits
+        // (LITTLE endian order)
         inputs_permuted
             .chunks_exact(self.num_filter_inputs)
-            .map(|chunk| chunk.iter().fold(0, |acc, b| (acc << 1) + (*b as u64)))
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .rev()
+                    .fold(0, |acc, b| (acc << 1) + (*b as u64))
+            })
             .collect()
     }
 
-    pub fn predict(&self, input_bits: Vec<bool>) -> Vec<u32> {
+    pub fn predict(&self, image: &Array2<u8>) -> Vec<u32> {
+        let input_bits = self.encode_image(image);
         let hash_inputs = self.compute_hash_inputs(input_bits);
         assert_eq!(hash_inputs.len(), self.bloom_filters.shape()[1]);
 
@@ -137,10 +165,11 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
         WnnCircuit::new(hash_inputs, self.bloom_filters.clone())
     }
 
-    pub fn mock_proof(&self, input_bits: Vec<bool>, k: u32) {
+    pub fn mock_proof(&self, image: &Array2<u8>, k: u32) {
+        let input_bits = self.encode_image(image);
         let hash_inputs = self.compute_hash_inputs(input_bits.clone());
         let outputs: Vec<Fp> = self
-            .predict(input_bits)
+            .predict(image)
             .iter()
             .map(|o| Fp::from(*o as u64))
             .collect();
@@ -154,10 +183,11 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
         circuit.plot("real_wnn_layout.png", k);
     }
 
-    pub fn proof_and_verify(&self, input_bits: Vec<bool>, k: u32) {
+    pub fn proof_and_verify(&self, image: &Array2<u8>, k: u32) {
+        let input_bits = self.encode_image(image);
         let hash_inputs = self.compute_hash_inputs(input_bits.clone());
         let outputs: Vec<Fp> = self
-            .predict(input_bits)
+            .predict(image)
             .iter()
             .map(|o| Fp::from(*o as u64))
             .collect();
