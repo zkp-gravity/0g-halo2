@@ -59,6 +59,10 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
         }
     }
 
+    pub fn num_input_bits(&self) -> usize {
+        self.input_order.len()
+    }
+
     fn mish_mash_hash(&self, x: u64) -> BigUint {
         let x = BigUint::from(x);
         let modulus = BigUint::from(self.num_filter_entries).pow(self.num_filter_hashes as u32);

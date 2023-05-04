@@ -15,3 +15,5 @@ hdf5 = "0.8.1"
 ndarray = "0.15.6"
 ff = "0.13.0"
 rand_core = "0.6.4"
+image = "0.24.6"
+clap = { version = "4.2.7", features = ["derive"] }
