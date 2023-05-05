@@ -554,7 +554,9 @@ mod tests {
 
         let root = BitMapBackend::new("bloom-filter-layout.png", (1024, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
-        let root = root.titled("Hash Chip Layout", ("sans-serif", 60)).unwrap();
+        let root = root
+            .titled("Bloom filter Layout", ("sans-serif", 60))
+            .unwrap();
 
         let circuit = MyCircuit::<Fp> {
             input: 2,

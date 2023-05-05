@@ -179,7 +179,7 @@ impl<
 
         let root = BitMapBackend::new(filename, (1024, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
-        let root = root.titled("Hash Chip Layout", ("sans-serif", 60)).unwrap();
+        let root = root.titled("WNN Layout", ("sans-serif", 60)).unwrap();
         halo2_proofs::dev::CircuitLayout::default()
             .show_labels(true)
             .render(k, self, &root)
