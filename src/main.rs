@@ -25,7 +25,7 @@ struct Arguments {
 #[derive(Subcommand)]
 enum Commands {
     /// Proof inference of a particular image
-    Proof { img_path: PathBuf },
+    Proof { img_path: PathBuf, k: u32 },
     /// Predict inference of a particular image (no proving)
     Predict { img_path: PathBuf },
     /// Compute the accuracy on the test set (in data/MNIST/png)
@@ -61,17 +61,17 @@ fn parse_png_file(img_path: &Path) -> Option<usize> {
 fn main() -> Result<()> {
     let args: Arguments = Arguments::parse();
 
-    let wnn: Wnn<2097143, 20, 2, 10> =
-        load_wnn("models/model_28input_1024entry_2hash_2bpi.pickle.hdf5")?;
-    // let wnn: Wnn<509, 8, 1, 8> = load_wnn("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")?;
+    // let wnn: Wnn<2097143, 20, 2, 10> =
+    //     load_wnn("models/model_28input_1024entry_2hash_2bpi.pickle.hdf5")?;
+    let wnn: Wnn<509, 8, 1, 8> = load_wnn("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")?;
 
     match args.command {
-        Commands::Proof { img_path } => {
+        Commands::Proof { img_path, k } => {
             let img = load_image(img_path).unwrap();
             println!("{:?}", wnn.predict(&img));
 
-            wnn.mock_proof(&img, 20);
-            wnn.proof_and_verify(&img, 20);
+            wnn.mock_proof(&img, k);
+            wnn.proof_and_verify(&img, k);
 
             Ok(())
         }
