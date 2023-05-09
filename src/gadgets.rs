@@ -1,5 +1,5 @@
 mod bloom_filter;
 mod hash;
 mod response_accumulator;
-mod select_ith_byte;
+mod byte_selector;
 pub mod wnn;

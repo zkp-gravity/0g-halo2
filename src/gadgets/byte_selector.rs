@@ -7,9 +7,9 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use crate::utils::{decompose_word, enable_range, print_values, to_u32};
+use crate::utils::{decompose_word, enable_range, to_u32};
 
-pub(crate) trait SelectIthByteInstructions<F: PrimeField> {
+pub(crate) trait ByteSelectorInstructions<F: PrimeField> {
     fn select_ith_byte(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -20,7 +20,7 @@ pub(crate) trait SelectIthByteInstructions<F: PrimeField> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SelectIthByteConfig {
+pub(crate) struct ByteSelectorConfig {
     byte_decomposition: Column<Advice>,
     lookup_index: Column<Advice>,
     byte_index: Column<Advice>,
@@ -36,13 +36,13 @@ pub(crate) struct SelectIthByteConfig {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SelectIthByteChip<F: PrimeField> {
-    config: SelectIthByteConfig,
+pub(crate) struct ByteSelectorChip<F: PrimeField> {
+    config: ByteSelectorConfig,
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> SelectIthByteChip<F> {
-    pub(crate) fn construct(config: SelectIthByteConfig) -> Self {
+impl<F: PrimeField> ByteSelectorChip<F> {
+    pub(crate) fn construct(config: ByteSelectorConfig) -> Self {
         Self {
             config,
             _marker: PhantomData,
@@ -58,7 +58,7 @@ impl<F: PrimeField> SelectIthByteChip<F> {
         selector_acc: Column<Advice>,
         byte_acc: Column<Advice>,
         byte_table: TableColumn,
-    ) -> SelectIthByteConfig {
+    ) -> ByteSelectorConfig {
         let byte_decomposition_selector = meta.complex_selector();
         let is_bit_selector = meta.selector();
         let selector_acc_selector = meta.selector();
@@ -130,7 +130,7 @@ impl<F: PrimeField> SelectIthByteChip<F> {
             )
         });
 
-        SelectIthByteConfig {
+        ByteSelectorConfig {
             byte_decomposition,
             lookup_index,
             byte_index,
@@ -146,7 +146,7 @@ impl<F: PrimeField> SelectIthByteChip<F> {
     }
 }
 
-impl<F: PrimeField> SelectIthByteInstructions<F> for SelectIthByteChip<F> {
+impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
     fn select_ith_byte(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -321,7 +321,7 @@ mod tests {
         plonk::{Circuit, Column, Instance, TableColumn},
     };
 
-    use super::{SelectIthByteChip, SelectIthByteConfig, SelectIthByteInstructions};
+    use super::{ByteSelectorChip, ByteSelectorConfig, ByteSelectorInstructions};
 
     #[derive(Default)]
     struct MyCircuit<F: PrimeField> {
@@ -333,7 +333,7 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct Config {
-        config: SelectIthByteConfig,
+        config: ByteSelectorConfig,
         instance: Column<Instance>,
         table_column: TableColumn,
     }
@@ -368,7 +368,7 @@ mod tests {
             meta.enable_constant(constants);
 
             Config {
-                config: SelectIthByteChip::configure(
+                config: ByteSelectorChip::configure(
                     meta,
                     byte_decomposition,
                     lookup_index,
@@ -422,7 +422,7 @@ mod tests {
                 },
             )?;
 
-            let chip = SelectIthByteChip::construct(config.config);
+            let chip = ByteSelectorChip::construct(config.config);
             let result =
                 chip.select_ith_byte(&mut layouter, input_cell, index_cell, self.num_bytes)?;
 
