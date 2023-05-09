@@ -1,5 +1,10 @@
+use std::ops::Range;
+
 use ff::PrimeField;
-use halo2_proofs::circuit::Value;
+use halo2_proofs::{
+    circuit::{Region, Value},
+    plonk::{Selector, Error},
+};
 use num_bigint::BigUint;
 
 #[allow(dead_code)]
@@ -12,6 +17,17 @@ pub(crate) fn print_values<F: PrimeField>(name: &str, values: &Vec<Value<F>>) {
     values.iter().for_each(|value| {
         value.map(|x| println!("{name}: {}", to_u32(&x)));
     });
+}
+
+pub(crate) fn enable_range<F: PrimeField>(
+    region: &mut Region<F>,
+    selector: Selector,
+    range: Range<usize>,
+) -> Result<(), Error> {
+    for i in range {
+        selector.enable(region, i)?;
+    }
+    Ok(())
 }
 
 pub fn argmax(vec: &Vec<u32>) -> usize {
