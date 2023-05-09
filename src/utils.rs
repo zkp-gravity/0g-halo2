@@ -3,19 +3,19 @@ use std::ops::Range;
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{Region, Value},
-    plonk::{Selector, Error},
+    plonk::{Error, Selector},
 };
 use num_bigint::BigUint;
 
 #[allow(dead_code)]
 pub(crate) fn print_value<F: PrimeField>(name: &str, value: Value<&F>) {
-    value.map(|x| println!("{name}: {}", to_u32(x)));
+    value.map(|x| println!("{name}: {:#01x}", to_u32(x)));
 }
 
 #[allow(dead_code)]
 pub(crate) fn print_values<F: PrimeField>(name: &str, values: &Vec<Value<F>>) {
     values.iter().for_each(|value| {
-        value.map(|x| println!("{name}: {}", to_u32(&x)));
+        value.map(|x| println!("{name}: {:#01x}", to_u32(&x)));
     });
 }
 

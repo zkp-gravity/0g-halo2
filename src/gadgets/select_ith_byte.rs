@@ -7,7 +7,7 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use crate::utils::{decompose_word, enable_range, to_u32};
+use crate::utils::{decompose_word, enable_range, print_values, to_u32};
 
 pub(crate) trait SelectIthByteInstructions<F: PrimeField> {
     fn select_ith_byte(
@@ -118,11 +118,11 @@ impl<F: PrimeField> SelectIthByteChip<F> {
             let byte_acc_prev = meta.query_advice(byte_acc, Rotation::prev());
 
             // Reconstruct byte
+            let z_prev = meta.query_advice(byte_decomposition, Rotation::prev());
             let z_cur = meta.query_advice(byte_decomposition, Rotation::cur());
-            let z_next = meta.query_advice(byte_decomposition, Rotation::next());
-            let byte = z_cur.clone() - z_next * F::from(1 << 8);
+            let byte = z_prev.clone() - z_cur * F::from(1 << 8);
 
-            let byte_selector = meta.query_advice(byte_selector, Rotation::cur());
+            let byte_selector = meta.query_advice(byte_selector, Rotation::prev());
 
             Constraints::with_selector(
                 byte_acc_selector,
@@ -164,7 +164,7 @@ impl<F: PrimeField> SelectIthByteInstructions<F> for SelectIthByteChip<F> {
                     .map(|(words, index)| words[to_u32(index) as usize]);
                 let words = words.transpose_vec(num_bytes);
 
-                let mut byte_decomposition = vec![word.value_field()];
+                let mut byte_decomposition = vec![word.value_field().evaluate()];
                 let shift_factor = F::from(1 << 8).invert().unwrap();
                 for word in words {
                     let prev = byte_decomposition[byte_decomposition.len() - 1];
@@ -175,7 +175,7 @@ impl<F: PrimeField> SelectIthByteInstructions<F> for SelectIthByteChip<F> {
                 }
 
                 byte_decomposition[byte_decomposition.len() - 1]
-                    .assert_if_known(|last_value| last_value.evaluate() == F::ZERO);
+                    .assert_if_known(|last_value| *last_value == F::ZERO);
 
                 word.copy_advice(|| "word", &mut region, self.config.byte_decomposition, 0)?;
                 for i in 1..(byte_decomposition.len() - 1) {
@@ -264,9 +264,9 @@ impl<F: PrimeField> SelectIthByteInstructions<F> for SelectIthByteChip<F> {
                 for i in 1..byte_decomposition.len() {
                     let byte_acc_value = index.value().zip(ith_word).map(|(index, ith_word)| {
                         if i - 1 >= to_u32(index) as usize {
-                            F::ONE
-                        } else {
                             ith_word
+                        } else {
+                            F::ZERO
                         }
                     });
                     result = region.assign_advice(
@@ -432,15 +432,29 @@ mod tests {
     }
 
     #[test]
-    fn test() {
+    fn test_1byte() {
+        let k = 9;
+        let circuit = MyCircuit::<Fp> {
+            input: 0xab,
+            index: 0,
+            num_bytes: 1,
+            _marker: PhantomData,
+        };
+        let output = Fp::from(0xab);
+        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
+        prover.assert_satisfied();
+    }
+
+    #[test]
+    fn test_3byte() {
         let k = 9;
         let circuit = MyCircuit::<Fp> {
             input: 0xabcdef,
-            index: 2,
+            index: 1,
             num_bytes: 3,
             _marker: PhantomData,
         };
-        let output = Fp::from(0xef);
+        let output = Fp::from(0xcd);
         let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
         prover.assert_satisfied();
     }
@@ -458,7 +472,7 @@ mod tests {
 
         let circuit = MyCircuit::<Fp> {
             input: 0xabcdef,
-            index: 2,
+            index: 1,
             num_bytes: 3,
             _marker: PhantomData,
         };
