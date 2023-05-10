@@ -56,7 +56,7 @@ pub(crate) fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
 
 /// Implement to_le_bits for any `PrimeField` type, not just `PrimeFieldBits`
 /// For example, the BN256 Fr type does not implement PrimeFieldBits
-fn to_le_bits<F: PrimeField>(x: &F, n_bits: usize) -> Vec<bool> {
+pub fn to_le_bits<F: PrimeField>(x: &F, n_bits: usize) -> Vec<bool> {
     // This assumes numbers are stored in little endian order
     let mut x = BigUint::from_bytes_le(x.to_repr().as_ref());
 
