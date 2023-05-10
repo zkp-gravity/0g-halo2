@@ -187,6 +187,19 @@ impl<
     }
 }
 
+pub struct CircuitParams {
+    p: u64,
+    l: usize,
+    n_hashes: usize,
+    bits_per_hash: usize,
+}
+
+impl Default for CircuitParams {
+    fn default() -> Self {
+        unimplemented!("Parameters have to be specified by hand!")
+    }
+}
+
 impl<
         F: PrimeField,
         const P: u64,
@@ -197,6 +210,7 @@ impl<
 {
     type Config = WnnCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
+    type Params = CircuitParams;
 
     fn without_witnesses(&self) -> Self {
         Self {
@@ -206,7 +220,16 @@ impl<
         }
     }
 
-    fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
+    fn params(&self) -> Self::Params {
+        CircuitParams {
+            p: P,
+            l: L,
+            n_hashes: N_HASHES,
+            bits_per_hash: BITS_PER_HASH,
+        }
+    }
+
+    fn configure_with_params(meta: &mut ConstraintSystem<F>, params: Self::Params) -> Self::Config {
         let instance_column = meta.instance_column();
 
         let advice_columns = [
@@ -226,10 +249,13 @@ impl<
         meta.enable_constant(constants);
 
         let bloom_filter_config = BloomFilterConfig {
-            n_hashes: N_HASHES,
-            bits_per_hash: BITS_PER_HASH,
+            n_hashes: params.n_hashes,
+            bits_per_hash: params.bits_per_hash,
         };
-        let hash_function_config = HashFunctionConfig { p: P, l: L };
+        let hash_function_config = HashFunctionConfig {
+            p: params.p,
+            l: params.l,
+        };
         let wnn_config = WnnConfig {
             bloom_filter_config,
             hash_function_config,
@@ -258,6 +284,10 @@ impl<
         }
 
         Ok(())
+    }
+
+    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+        unimplemented!("configure_with_params should be used!")
     }
 }
 
