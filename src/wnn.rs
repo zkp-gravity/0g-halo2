@@ -21,9 +21,9 @@ use halo2_proofs::halo2curves::bn256::{Bn256, Fr as Fp, G1Affine};
 use num_bigint::BigUint;
 use rand_core::OsRng;
 
-use crate::gadgets::wnn::WnnCircuit;
+use crate::gadgets::wnn::{WnnCircuit, WnnCircuitParams};
 
-pub struct Wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: usize> {
+pub struct Wnn {
     num_classes: usize,
     num_filter_entries: usize,
     num_filter_hashes: usize,
@@ -37,9 +37,7 @@ pub struct Wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_P
     binarization_thresholds: Array3<f32>,
 }
 
-impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: usize>
-    Wnn<P, L, N_HASHES, BITS_PER_HASH>
-{
+impl Wnn {
     pub fn new(
         num_classes: usize,
         num_filter_entries: usize,
@@ -158,11 +156,14 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
             .collect::<Vec<_>>()
     }
 
-    fn get_circuit(&self, hash_inputs: Vec<u64>) -> WnnCircuit<Fp, P, L, N_HASHES, BITS_PER_HASH> {
-        assert_eq!(self.p, P);
-        assert_eq!(self.num_filter_entries, 1 << BITS_PER_HASH);
-        assert_eq!(self.num_filter_hashes, N_HASHES);
-        WnnCircuit::new(hash_inputs, self.bloom_filters.clone())
+    fn get_circuit(&self, hash_inputs: Vec<u64>) -> WnnCircuit<Fp> {
+        let params = WnnCircuitParams {
+            p: self.p,
+            l: self.num_filter_hashes * (self.num_filter_entries as f32).log2() as usize,
+            n_hashes: self.num_filter_hashes,
+            bits_per_hash: (self.num_filter_entries as f32).log2() as usize,
+        };
+        WnnCircuit::new(hash_inputs, self.bloom_filters.clone(), params)
     }
 
     pub fn mock_proof(&self, image: &Array2<u8>, k: u32) {
