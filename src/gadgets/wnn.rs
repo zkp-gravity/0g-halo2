@@ -248,6 +248,7 @@ impl<
             bloom_filter_config,
             hash_function_config,
         };
+
         WnnCircuitConfig {
             wnn_chip_config: WnnChip::configure(
                 meta,
@@ -287,7 +288,7 @@ mod tests {
     use std::marker::PhantomData;
 
     use halo2_proofs::dev::MockProver;
-    use halo2_proofs::halo2curves::pasta::pallas::Base as Fp;
+    use halo2_proofs::halo2curves::bn256::Fq as Fp;
     use ndarray::array;
 
     use super::WnnCircuit;

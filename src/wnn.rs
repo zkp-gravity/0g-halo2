@@ -1,8 +1,25 @@
-use halo2_proofs::dev::MockProver;
+use std::time::Instant;
+
+use halo2_proofs::{
+    dev::MockProver,
+    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof},
+    poly::{
+        commitment::ParamsProver,
+        kzg::{
+            commitment::{KZGCommitmentScheme, ParamsKZG},
+            multiopen::{ProverGWC, VerifierGWC},
+            strategy::SingleStrategy,
+        },
+    },
+    transcript::{
+        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+    },
+};
 use ndarray::{Array1, Array3};
 
-use halo2_proofs::halo2curves::pasta::pallas::Base as Fp;
+use halo2_proofs::halo2curves::bn256::{Bn256, Fr as Fp, G1Affine};
 use num_bigint::BigUint;
+use rand_core::OsRng;
 
 use crate::gadgets::wnn::WnnCircuit;
 
@@ -148,62 +165,62 @@ impl<
         circuit.plot("real_wnn_layout.png", 11);
     }
 
-    pub fn proof_and_verify(&self, _input_bits: Vec<bool>, _k: u32) {
-        // let hash_inputs = self.compute_hash_inputs(input_bits.clone());
-        // let outputs: Vec<Fp> = self
-        //     .predict(input_bits)
-        //     .iter()
-        //     .map(|o| Fp::from(*o as u64))
-        //     .collect();
+    pub fn proof_and_verify(&self, input_bits: Vec<bool>, k: u32) {
+        let hash_inputs = self.compute_hash_inputs(input_bits.clone());
+        let outputs: Vec<Fp> = self
+            .predict(input_bits)
+            .iter()
+            .map(|o| Fp::from(*o as u64))
+            .collect();
 
-        // let circuit = self.get_circuit(hash_inputs);
+        let circuit = self.get_circuit(hash_inputs);
 
-        // println!("Key gen...");
-        // let start = Instant::now();
+        println!("Key gen...");
+        let start = Instant::now();
 
-        // let params: ParamsKZG<Bn256> = ParamsKZG::new(k);
-        // let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
-        // let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
+        let params: ParamsKZG<Bn256> = ParamsKZG::new(k);
+        let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
+        let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
 
-        // let duration = start.elapsed();
-        // println!("Took: {:?}", duration);
+        let duration = start.elapsed();
+        println!("Took: {:?}", duration);
 
-        // println!("Proving...");
-        // let start = Instant::now();
+        println!("Proving...");
+        let start = Instant::now();
 
-        // let mut transcript: Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>> =
-        //     Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        // create_proof::<KZGCommitmentScheme<Bn256>, ProverGWC<Bn256>, _, _, _, _>(
-        //     &params,
-        //     &pk,
-        //     &[circuit],
-        //     &[&[outputs.as_ref()]],
-        //     OsRng,
-        //     &mut transcript,
-        // )
-        // .unwrap();
-        // let proof = transcript.finalize();
+        let mut transcript: Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>> =
+            Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+        create_proof::<KZGCommitmentScheme<Bn256>, ProverGWC<Bn256>, _, _, _, _>(
+            &params,
+            &pk,
+            &[circuit],
+            &[&[outputs.as_ref()]],
+            OsRng,
+            &mut transcript,
+        )
+        .unwrap();
+        let proof = transcript.finalize();
 
-        // let duration = start.elapsed();
-        // println!("Took: {:?}", duration);
+        let duration = start.elapsed();
+        println!("Took: {:?}", duration);
 
-        // println!("Verifying...");
-        // let start = Instant::now();
+        println!("Verifying...");
+        let start = Instant::now();
 
-        // let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        // let strategy = SingleStrategy::new(&params);
-        // verify_proof::<_, VerifierGWC<Bn256>, _, _, _>(
-        //     &params,
-        //     pk.get_vk(),
-        //     strategy.clone(),
-        //     &[&[outputs.as_ref()]],
-        //     &mut transcript.clone(),
-        // )
-        // .unwrap();
+        let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        let strategy = SingleStrategy::new(&params);
+        verify_proof::<_, VerifierGWC<Bn256>, _, _, _>(
+            &params,
+            pk.get_vk(),
+            strategy.clone(),
+            &[&[outputs.as_ref()]],
+            &mut transcript.clone(),
+        )
+        .unwrap();
 
-        // let duration = start.elapsed();
-        // println!("Took: {:?}", duration);
+        let duration = start.elapsed();
+        println!("Took: {:?}", duration);
 
-        // println!("Done!");
+        println!("Done!");
     }
 }
