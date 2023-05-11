@@ -10,7 +10,7 @@ use halo2_proofs::{
 use crate::utils::{decompose_word, enable_range, to_u32};
 
 pub(crate) trait ByteSelectorInstructions<F: PrimeField> {
-    fn select_ith_byte(
+    fn select_byte(
         &self,
         layouter: &mut impl Layouter<F>,
         word: AssignedCell<F, F>,
@@ -147,7 +147,7 @@ impl<F: PrimeField> ByteSelectorChip<F> {
 }
 
 impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
-    fn select_ith_byte(
+    fn select_byte(
         &self,
         layouter: &mut impl Layouter<F>,
         word: AssignedCell<F, F>,
@@ -155,21 +155,21 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
         num_bytes: usize,
     ) -> Result<AssignedCell<F, F>, Error> {
         layouter.assign_region(
-            || "select_ith_byte",
+            || "select_byte",
             |mut region| {
-                let words = word.value().map(|word| decompose_word(word, num_bytes, 8));
-                let ith_word = words
+                let bytes = word.value().map(|word| decompose_word(word, num_bytes, 8));
+                let ith_byte = bytes
                     .clone()
                     .zip(index.value())
                     .map(|(words, index)| words[to_u32(index) as usize]);
-                let words = words.transpose_vec(num_bytes);
+                let bytes = bytes.transpose_vec(num_bytes);
 
                 let mut byte_decomposition = vec![word.value_field().evaluate()];
                 let shift_factor = F::from(1 << 8).invert().unwrap();
-                for word in words {
+                for byte in bytes {
                     let prev = byte_decomposition[byte_decomposition.len() - 1];
                     byte_decomposition.push(
-                        word.zip(prev)
+                        byte.zip(prev)
                             .map(|(word, prev)| (prev - word) * shift_factor),
                     );
                 }
@@ -262,9 +262,9 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
                     F::ZERO,
                 )?;
                 for i in 1..byte_decomposition.len() {
-                    let byte_acc_value = index.value().zip(ith_word).map(|(index, ith_word)| {
+                    let byte_acc_value = index.value().zip(ith_byte).map(|(index, ith_byte)| {
                         if i - 1 >= to_u32(index) as usize {
-                            ith_word
+                            ith_byte
                         } else {
                             F::ZERO
                         }
@@ -423,8 +423,7 @@ mod tests {
             )?;
 
             let chip = ByteSelectorChip::construct(config.config);
-            let result =
-                chip.select_ith_byte(&mut layouter, input_cell, index_cell, self.num_bytes)?;
+            let result = chip.select_byte(&mut layouter, input_cell, index_cell, self.num_bytes)?;
 
             layouter.constrain_instance(result.cell(), config.instance, 0)?;
             Ok(())
@@ -463,11 +462,10 @@ mod tests {
     fn plot() {
         use plotters::prelude::*;
 
-        let root =
-            BitMapBackend::new("select-ith-byte-layout.png", (512, 1024)).into_drawing_area();
+        let root = BitMapBackend::new("byte-selector-layout.png", (512, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root
-            .titled("Select ith Byte Layout", ("sans-serif", 60))
+            .titled("Byte Selector Layout", ("sans-serif", 60))
             .unwrap();
 
         let circuit = MyCircuit::<Fp> {
