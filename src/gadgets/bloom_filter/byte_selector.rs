@@ -170,7 +170,7 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
                     let prev = byte_decomposition[byte_decomposition.len() - 1];
                     byte_decomposition.push(
                         byte.zip(prev)
-                            .map(|(word, prev)| (prev - word) * shift_factor),
+                            .map(|(byte, prev)| (prev - byte) * shift_factor),
                     );
                 }
 
