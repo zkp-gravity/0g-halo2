@@ -1,11 +1,11 @@
+use std::path::Path;
+
 use hdf5::{File, Result};
 use ndarray::{Ix1, Ix3};
 
 use crate::wnn::Wnn;
 
-pub fn load_wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: usize>(
-    path: &str,
-) -> Result<Wnn<P, L, N_HASHES, BITS_PER_HASH>> {
+pub fn load_wnn(path: &Path) -> Result<Wnn> {
     let file = File::open(path)?;
     for attr_name in file.attr_names()? {
         let attr = file.attr(&attr_name)?.read_scalar::<i64>()?;
@@ -19,11 +19,6 @@ pub fn load_wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_
     let num_filter_entries = file.attr("num_filter_entries")?.read_scalar::<i64>()? as usize;
     let num_filter_hashes = file.attr("num_filter_hashes")?.read_scalar::<i64>()? as usize;
     let p = file.attr("p")?.read_scalar::<i64>()? as u64;
-
-    assert_eq!(p, P);
-    assert_eq!(num_filter_entries.pow(num_filter_hashes as u32), 1 << L);
-    assert_eq!(num_filter_hashes, N_HASHES);
-    assert_eq!(num_filter_entries, 1 << BITS_PER_HASH);
 
     let expected_shape = [
         num_classes,
@@ -46,7 +41,7 @@ pub fn load_wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_
     let num_input_bits = num_inputs * bits_per_input;
     assert_eq!(input_order.shape(), [num_input_bits]);
 
-    Ok(Wnn::<P, L, N_HASHES, BITS_PER_HASH>::new(
+    Ok(Wnn::new(
         num_classes,
         num_filter_entries,
         num_filter_hashes,

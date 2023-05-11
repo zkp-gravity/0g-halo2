@@ -9,7 +9,6 @@ use indicatif::ProgressIterator;
 use zero_g::{
     io::{image::load_image, model::load_wnn},
     utils::argmax,
-    wnn::Wnn,
 };
 
 #[derive(Parser)]
@@ -25,11 +24,18 @@ struct Arguments {
 #[derive(Subcommand)]
 enum Commands {
     /// Proof inference of a particular image
-    Proof { img_path: PathBuf, k: u32 },
+    Proof {
+        model_path: PathBuf,
+        img_path: PathBuf,
+        k: u32,
+    },
     /// Predict inference of a particular image (no proving)
-    Predict { img_path: PathBuf },
+    Predict {
+        model_path: PathBuf,
+        img_path: PathBuf,
+    },
     /// Compute the accuracy on the test set (in data/MNIST/png)
-    ComputeAccuracy,
+    ComputeAccuracy { model_path: PathBuf },
 }
 
 fn parse_png_file(img_path: &Path) -> Option<usize> {
@@ -61,27 +67,37 @@ fn parse_png_file(img_path: &Path) -> Option<usize> {
 fn main() -> Result<()> {
     let args: Arguments = Arguments::parse();
 
-    // let wnn: Wnn<2097143, 20, 2, 10> =
-    //     load_wnn("models/model_28input_1024entry_2hash_2bpi.pickle.hdf5")?;
-    let wnn: Wnn<509, 8, 1, 8> = load_wnn("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")?;
-
     match args.command {
-        Commands::Proof { img_path, k } => {
-            let img = load_image(img_path).unwrap();
-            println!("{:?}", wnn.predict(&img));
+        Commands::Proof {
+            model_path,
+            img_path,
+            k,
+        } => {
+            let wnn = load_wnn(&model_path)?;
+            let img = load_image(&img_path).unwrap();
+            println!("Prediction: {:?}", wnn.predict(&img));
 
+            println!("Verifying constraints...");
             wnn.mock_proof(&img, k);
+
+            println!("Proving...");
             wnn.proof_and_verify(&img, k);
 
             Ok(())
         }
-        Commands::Predict { img_path } => {
-            let img = load_image(img_path).unwrap();
+        Commands::Predict {
+            model_path,
+            img_path,
+        } => {
+            let wnn = load_wnn(&model_path)?;
+            let img = load_image(&img_path).unwrap();
             println!("{:?}", wnn.predict(&img));
 
             Ok(())
         }
-        Commands::ComputeAccuracy => {
+        Commands::ComputeAccuracy { model_path } => {
+            let wnn = load_wnn(&model_path)?;
+
             let mut correct = 0;
             let mut total = 0;
 
@@ -90,7 +106,7 @@ fn main() -> Result<()> {
                 let img_path = dir_entry.unwrap().path();
 
                 if let Some(correct_class) = parse_png_file(&img_path) {
-                    let img = load_image(img_path).unwrap();
+                    let img = load_image(&img_path).unwrap();
                     let scores = wnn.predict(&img);
                     let prediction = argmax(&scores);
 
