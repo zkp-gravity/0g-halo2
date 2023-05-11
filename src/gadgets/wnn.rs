@@ -8,7 +8,7 @@ use halo2_proofs::{
 use ndarray::{array, Array3};
 
 use crate::gadgets::{
-    bloom_filter::{
+    bloom_filter_old::{
         BloomFilterChip, BloomFilterChipConfig, BloomFilterConfig, BloomFilterInstructions,
     },
     hash::{HashChip, HashConfig, HashInstructions},
