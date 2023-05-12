@@ -17,7 +17,7 @@ pub struct LookupResult<F: PrimeField> {
 pub(crate) trait ArrayLookupInstructions<F: PrimeField> {
     /// Given a hash value and a bloom index, decomposes the hash, looks up the word in the bloom array
     /// and returns the word, byte index and bit index for each hash value
-    fn bloom_lookup(
+    fn array_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
         hash_value: AssignedCell<F, F>,
@@ -56,20 +56,41 @@ pub(crate) struct ArrayLookupChipConfig {
 
 pub(crate) struct ArrayLookupChip<F: PrimeField> {
     config: ArrayLookupChipConfig,
-    bloom_filter_words: Option<Vec<Vec<F>>>,
+    bloom_filter_words: Vec<Vec<F>>,
 }
 
 impl<F: PrimeField> ArrayLookupChip<F> {
-    pub(crate) fn construct(config: ArrayLookupChipConfig) -> Self {
+    pub(crate) fn construct(
+        config: ArrayLookupChipConfig,
+        bloom_filter_arrays: Array2<bool>,
+    ) -> Self {
+        let bloom_filter_length = 1 << config.array_lookup_config.bits_per_hash;
+        assert_eq!(bloom_filter_arrays.shape()[1], bloom_filter_length);
+
+        let word_length = 1
+            << (config.array_lookup_config.bits_per_hash
+                - config.array_lookup_config.word_index_bits);
+        assert_eq!(bloom_filter_arrays.shape()[1] % word_length, 0);
+
+        let bloom_filter_words = (0..bloom_filter_arrays.shape()[0])
+            .map(|i| {
+                let bits = bloom_filter_arrays.row(i).to_vec();
+                bits.chunks_exact(word_length)
+                    .map(|word_bits| from_be_bits::<F>(&word_bits))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+
         ArrayLookupChip {
             config,
-            // Set to None initially, have to call load() before synthesis
-            bloom_filter_words: None,
+            bloom_filter_words,
         }
     }
 
     pub fn bytes_per_word(&self) -> usize {
-        1 << self.config.array_lookup_config.word_index_bits
+        1 << (self.config.array_lookup_config.bits_per_hash
+            - self.config.array_lookup_config.word_index_bits
+            - 3)
     }
 
     pub(crate) fn configure(
@@ -147,34 +168,14 @@ impl<F: PrimeField> ArrayLookupChip<F> {
         }
     }
 
-    pub(crate) fn load(
-        &mut self,
-        layouter: &mut impl Layouter<F>,
-        bloom_filter_arrays: Array2<bool>,
-    ) -> Result<(), Error> {
-        let config = &self.config.array_lookup_config;
-        let bloom_filter_length = 1 << config.bits_per_hash;
-        assert_eq!(bloom_filter_arrays.shape()[1], bloom_filter_length);
-
-        let word_length = 1 << (config.bits_per_hash - config.word_index_bits);
-        assert_eq!(bloom_filter_arrays.shape()[1] % word_length, 0);
-
-        let bloom_filter_words = (0..bloom_filter_arrays.shape()[0])
-            .map(|i| {
-                let bits = bloom_filter_arrays.row(i).to_vec();
-                bits.chunks_exact(word_length)
-                    .map(|word_bits| from_be_bits::<F>(&word_bits))
-                    .collect::<Vec<_>>()
-            })
-            .collect::<Vec<_>>();
-
+    pub(crate) fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         layouter.assign_table(
             || "bloom_filters",
             |mut table| {
                 let mut offset = 0usize;
 
-                for bloom_index in 0..bloom_filter_arrays.shape()[0] {
-                    for (i, word) in bloom_filter_words[bloom_index].iter().enumerate() {
+                for bloom_index in 0..self.bloom_filter_words.len() {
+                    for (i, word) in self.bloom_filter_words[bloom_index].iter().enumerate() {
                         table.assign_cell(
                             || "bloom_index",
                             self.config.table_bloom_index,
@@ -210,13 +211,12 @@ impl<F: PrimeField> ArrayLookupChip<F> {
             },
         )?;
 
-        self.bloom_filter_words = Some(bloom_filter_words);
         Ok(())
     }
 }
 
 impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
-    fn bloom_lookup(
+    fn array_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
         hash_value: AssignedCell<F, F>,
@@ -228,11 +228,6 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
                 let n_hashes = self.config.array_lookup_config.n_hashes;
                 let bits_per_hash = self.config.array_lookup_config.bits_per_hash;
                 let word_index_bits = self.config.array_lookup_config.word_index_bits;
-
-                let bloom_filter_words = self
-                    .bloom_filter_words
-                    .as_ref()
-                    .expect("Should call load() before bloom_lookup()!");
 
                 // Compute values to put in cells
                 // The hash decomposition wors on assuming a little endian representation of the hash value,
@@ -275,7 +270,7 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
                             .iter()
                             .map(|(word_index, _, _)| {
                                 let word_index = to_u32(word_index) as usize;
-                                bloom_filter_words[bloom_index][word_index]
+                                self.bloom_filter_words[bloom_index][word_index]
                             })
                             .collect::<Vec<_>>()
                     })
@@ -475,10 +470,13 @@ mod tests {
                 },
             )?;
 
-            let mut bloom_filter_chip = ArrayLookupChip::construct(config.bloom_filter_chip_config);
-            bloom_filter_chip.load(&mut layouter, self.bloom_filter_arrays.clone())?;
+            let mut bloom_filter_chip = ArrayLookupChip::construct(
+                config.bloom_filter_chip_config,
+                self.bloom_filter_arrays.clone(),
+            );
+            bloom_filter_chip.load(&mut layouter)?;
 
-            let results = bloom_filter_chip.bloom_lookup(
+            let results = bloom_filter_chip.array_lookup(
                 &mut layouter.namespace(|| "bloom_filter_lookup"),
                 input_cell,
                 F::from(self.bloom_index),
