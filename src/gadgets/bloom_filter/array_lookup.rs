@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::utils::{decompose_word, enable_range, to_u32};
+use crate::utils::{decompose_word_be, enable_range, from_be_bits, to_u32};
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
@@ -18,6 +18,8 @@ pub struct LookupResult<F: PrimeField> {
 }
 
 pub(crate) trait ArrayLookupInstructions<F: PrimeField> {
+    /// Given a hash value and a bloom index, decomposes the hash, looks up the word in the bloom array
+    /// and returns the word, byte index and bit index for each hash value
     fn bloom_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -31,8 +33,10 @@ pub struct ArrayLookupConfig {
     /// Number of hashes per bloom filter
     pub n_hashes: usize,
 
+    /// Number of bits per hash, i.e., the log2 of the number of bits in the bloom filter array
     pub bits_per_hash: usize,
 
+    /// Number of bits for the word index
     pub word_index_bits: usize,
 }
 
@@ -79,7 +83,7 @@ impl<F: PrimeField> ArrayLookupChip<F> {
         bloom_value: Column<Advice>,
         bloom_filter_config: ArrayLookupConfig,
     ) -> ArrayLookupChipConfig {
-        assert!(bloom_filter_config.bits_per_hash < 64);
+        assert!(bloom_filter_config.bits_per_hash <= 32);
 
         let validate_hash_decomposition_selector = meta.selector();
         meta.create_gate("validate_hash_decomposition", |meta| {
@@ -171,8 +175,12 @@ impl<F: PrimeField> ArrayLookupChip<F> {
         layouter: &mut impl Layouter<F>,
         bloom_filter_arrays: Array2<bool>,
     ) -> Result<(), Error> {
-        let bloom_filter_length = 1 << self.config.array_lookup_config.bits_per_hash;
+        let config = &self.config.array_lookup_config;
+        let bloom_filter_length = 1 << config.bits_per_hash;
         assert_eq!(bloom_filter_arrays.shape()[1], bloom_filter_length);
+
+        let word_length = config.word_index_bits - config.word_index_bits;
+        assert_eq!(bloom_filter_arrays.shape()[1] % word_length, 0);
 
         layouter.assign_table(
             || "bloom_filters",
@@ -180,10 +188,9 @@ impl<F: PrimeField> ArrayLookupChip<F> {
                 let mut offset = 0usize;
 
                 for bloom_index in 0..bloom_filter_arrays.shape()[0] {
-                    for i in 0..bloom_filter_length {
-                        let bloom_value = bloom_filter_arrays[(bloom_index, i)];
-                        let bloom_value = if bloom_value { F::ONE } else { F::ZERO };
-                        let bloom_value = Value::known(bloom_value);
+                    let bits = bloom_filter_arrays.row(bloom_index).to_vec();
+                    for word_bits in bits.chunks_exact(word_length) {
+                        let word = Value::known(from_be_bits::<F>(&word_bits));
 
                         table.assign_cell(
                             || "bloom_index",
@@ -196,7 +203,7 @@ impl<F: PrimeField> ArrayLookupChip<F> {
                             || "bloom_value",
                             self.config.table_bloom_value,
                             offset,
-                            || bloom_value,
+                            || word,
                         )?;
 
                         offset += 1;
@@ -234,7 +241,7 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
                 // Compute values to put in cells
                 let hash_values = hash_value
                     .value()
-                    .map(|hash_value| decompose_word(hash_value, n_hashes, bits_per_hash));
+                    .map(|hash_value| decompose_word_be(hash_value, n_hashes, bits_per_hash));
 
                 let index_values: Value<Vec<(F, F, F)>> = hash_values.clone().map(|hash_values| {
                     hash_values
@@ -387,6 +394,8 @@ mod tests {
     };
     use ndarray::{array, Array2};
 
+    use crate::utils::to_be_bits;
+
     use super::{
         ArrayLookupChip, ArrayLookupChipConfig, ArrayLookupConfig, ArrayLookupInstructions,
     };
@@ -436,7 +445,8 @@ mod tests {
 
             let bloom_filter_config = ArrayLookupConfig {
                 n_hashes: 2,
-                bits_per_hash: 2,
+                bits_per_hash: 4,
+                word_index_bits: 2,
             };
             let bloom_filter_chip_config = ArrayLookupChip::configure(
                 meta,
@@ -475,74 +485,76 @@ mod tests {
             let mut bloom_filter_chip = ArrayLookupChip::construct(config.bloom_filter_chip_config);
             bloom_filter_chip.load(&mut layouter, self.bloom_filter_arrays.clone())?;
 
-            let hash_value = bloom_filter_chip.bloom_lookup(
+            let results = bloom_filter_chip.bloom_lookup(
                 &mut layouter.namespace(|| "bloom_filter_lookup"),
                 input_cell,
                 F::from(self.bloom_index),
             )?;
 
-            layouter.constrain_instance(hash_value.cell(), config.instance, 0)?;
+            assert_eq!(results.len(), 2);
+
+            let mut i = 0;
+            for lookup_result in results {
+                layouter.constrain_instance(
+                    lookup_result.word.cell(),
+                    config.instance,
+                    3 * i + 0,
+                )?;
+                layouter.constrain_instance(
+                    lookup_result.byte_index.cell(),
+                    config.instance,
+                    3 * i + 1,
+                )?;
+                layouter.constrain_instance(
+                    lookup_result.bit_index.cell(),
+                    config.instance,
+                    3 * i + 2,
+                )?;
+                i += 3;
+            }
+
             Ok(())
         }
     }
 
     #[test]
-    fn test_8_positive() {
-        // -> Hashes to indices 0, and 2
+    fn test() {
         let k = 4;
-        let circuit = MyCircuit::<Fp> {
-            input: 8,
-            bloom_index: 0,
-            bloom_filter_arrays: array![[true, false, true, false]],
-            _marker: PhantomData,
-        };
-        let output = Fp::from(1);
-        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
-        prover.assert_satisfied();
-    }
 
-    #[test]
-    fn test_8_negative() {
-        // -> Hashes to indices 0, and 2
-        let k = 4;
-        let circuit = MyCircuit::<Fp> {
-            input: 8,
-            bloom_index: 0,
-            bloom_filter_arrays: array![[true, true, false, true]],
-            _marker: PhantomData,
-        };
-        let output = Fp::from(0);
-        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
-        prover.assert_satisfied();
-    }
+        // The array lookup config is:
+        // let bloom_filter_config = ArrayLookupConfig {
+        //     n_hashes: 2,
+        //     bits_per_hash: 8,
+        //     word_index_bits: 2,
+        // };
 
-    #[test]
-    fn test_10_positive() {
-        // -> Hashes to indices 2, and 2
-        let k = 4;
-        let circuit = MyCircuit::<Fp> {
-            input: 10,
-            bloom_index: 0,
-            bloom_filter_arrays: array![[false, false, true, false]],
-            _marker: PhantomData,
-        };
-        let output = Fp::from(1);
-        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
-        prover.assert_satisfied();
-    }
+        let word0 = Fp::from(0x1122334455667788u64);
+        let word1 = Fp::from(0x99aabbccddeeff00u64);
+        let word2 = Fp::from(0xbabababababababau64);
+        let word3 = Fp::from(0x0123456789abcdefu64);
 
-    #[test]
-    fn test_3_negative() {
-        // -> Hashes to indices 2, and 2
-        let k = 4;
+        let mut bits = to_be_bits(&word0, 64);
+        bits.append(&mut to_be_bits(&word1, 64));
+        bits.append(&mut to_be_bits(&word2, 64));
+        bits.append(&mut to_be_bits(&word3, 64));
+
+        let bloom_filter_arrays = Array2::from_shape_vec((1, 256), bits).unwrap();
+
         let circuit = MyCircuit::<Fp> {
-            input: 10,
+            input: 0b_01_001_101_00_111_000,
             bloom_index: 0,
-            bloom_filter_arrays: array![[true, true, false, true]],
+            bloom_filter_arrays,
             _marker: PhantomData,
         };
-        let output = Fp::from(0);
-        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
+        let output = vec![
+            Fp::from(word1),
+            Fp::from(0b001u64),
+            Fp::from(0b101u64),
+            Fp::from(word0),
+            Fp::from(0b111u64),
+            Fp::from(0b000u64),
+        ];
+        let prover = MockProver::run(k, &circuit, vec![output]).unwrap();
         prover.assert_satisfied();
     }
 
