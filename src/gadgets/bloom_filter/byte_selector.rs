@@ -7,7 +7,7 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use crate::utils::{decompose_word, enable_range, to_u32};
+use crate::utils::{decompose_word_be, enable_range, to_u32};
 
 pub(crate) trait ByteSelectorInstructions<F: PrimeField> {
     fn select_byte(
@@ -157,11 +157,17 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
         layouter.assign_region(
             || "select_byte",
             |mut region| {
-                let bytes = word.value().map(|word| decompose_word(word, num_bytes, 8));
+                // Bytes in **little endian** order
+                let bytes = word.value().map(|word| {
+                    decompose_word_be(word, num_bytes, 8)
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
+                });
                 let ith_byte = bytes
                     .clone()
                     .zip(index.value())
-                    .map(|(words, index)| words[to_u32(index) as usize]);
+                    .map(|(words, index)| words[num_bytes - 1 - to_u32(index) as usize]);
                 let bytes = bytes.transpose_vec(num_bytes);
 
                 let mut byte_decomposition = vec![word.value_field().evaluate()];
@@ -202,18 +208,20 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
                     )?;
                 }
 
-                for i in 0..(byte_decomposition.len() - 1) {
+                for i in 0..num_bytes {
                     region.assign_advice_from_constant(
-                        || "byte_decomposition_0",
+                        || "byte_index",
                         self.config.byte_index,
-                        i,
+                        // Bytes are listed in little endian order, but we want to select the
+                        // ith byte assuming big endian order, so invert the index here.
+                        num_bytes - 1 - i,
                         F::from(i as u64),
                     )?;
                 }
 
-                for i in 0..(byte_decomposition.len() - 1) {
+                for i in 0..num_bytes {
                     let selector_value = index.value().map(|index| {
-                        if *index == F::from(i as u64) {
+                        if (num_bytes - 1 - i) == to_u32(index) as usize {
                             F::ONE
                         } else {
                             F::ZERO
@@ -233,9 +241,9 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
                     0,
                     F::ZERO,
                 )?;
-                for i in 1..(byte_decomposition.len() - 1) {
+                for i in 1..num_bytes {
                     let selector_acc_value = index.value().map(|index| {
-                        if i - 1 >= to_u32(index) as usize {
+                        if (num_bytes - i) <= to_u32(index) as usize {
                             F::ONE
                         } else {
                             F::ZERO
@@ -263,7 +271,7 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
                 )?;
                 for i in 1..byte_decomposition.len() {
                     let byte_acc_value = index.value().zip(ith_byte).map(|(index, ith_byte)| {
-                        if i - 1 >= to_u32(index) as usize {
+                        if (num_bytes - i) <= to_u32(index) as usize {
                             ith_byte
                         } else {
                             F::ZERO
@@ -446,7 +454,21 @@ mod tests {
     }
 
     #[test]
-    fn test_3byte() {
+    fn test_3byte_0() {
+        let k = 9;
+        let circuit = MyCircuit::<Fp> {
+            input: 0xabcdef,
+            index: 0,
+            num_bytes: 3,
+            _marker: PhantomData,
+        };
+        let output = Fp::from(0xab);
+        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
+        prover.assert_satisfied();
+    }
+
+    #[test]
+    fn test_3byte_1() {
         let k = 9;
         let circuit = MyCircuit::<Fp> {
             input: 0xabcdef,

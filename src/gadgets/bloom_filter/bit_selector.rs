@@ -7,7 +7,7 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-use crate::utils::{to_le_bits, to_u32};
+use crate::utils::{to_be_bits, to_u32};
 
 pub trait BitSelectorInstructions<F: PrimeField> {
     fn select_bit(
@@ -86,7 +86,7 @@ impl<F: PrimeField> BitSelectorInstructions<F> for BitSelectorChip<F> {
             || "select_bit",
             |mut region| {
                 let bit = byte.value().zip(index.value()).map(|(byte, index)| {
-                    let bits = to_le_bits(byte, 8);
+                    let bits = to_be_bits(byte, 8);
                     let index = to_u32(index) as usize;
                     if bits[index] {
                         F::ONE
@@ -206,7 +206,11 @@ mod tests {
                     let mut table_index = 0;
                     for b in 0..(1 << 8) {
                         for i in 0..8 {
-                            let bit = if (b >> i) & 1 == 1 { F::ONE } else { F::ZERO };
+                            let bit = if b & (1 << (7 - i)) == 0 {
+                                F::ZERO
+                            } else {
+                                F::ONE
+                            };
 
                             table.assign_cell(
                                 || "byte",
@@ -250,7 +254,7 @@ mod tests {
             index: 0,
             _marker: PhantomData,
         };
-        let output = Fp::from(0);
+        let output = Fp::from(1);
         let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
         prover.assert_satisfied();
     }
@@ -276,7 +280,7 @@ mod tests {
             index: 7,
             _marker: PhantomData,
         };
-        let output = Fp::from(1);
+        let output = Fp::from(0);
         let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
         prover.assert_satisfied();
     }

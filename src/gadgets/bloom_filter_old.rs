@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use crate::utils::{decompose_word, to_u32};
+use crate::utils::{decompose_word_be, to_u32};
 use ff::PrimeField;
 /// Gadget that implements the bloom filter lookup:
 ///
@@ -214,15 +214,11 @@ impl<F: PrimeField> BloomFilterInstructions<F> for BloomFilterChip<F> {
 
                 // Compute values to put in cells
                 let hash_values = hash_value.value().map(|hash_value| {
-                    let mut words = decompose_word(
+                    decompose_word_be(
                         hash_value,
                         self.config.bloom_filter_config.n_hashes,
                         self.config.bloom_filter_config.bits_per_hash,
-                    );
-                    // Accumulator has to start with most significant word
-                    // Otherwise, the order doesn't matter, because a all results ANDed together anyway.
-                    words.reverse();
-                    words
+                    )
                 });
                 let shift_multiplier = F::from(1 << self.config.bloom_filter_config.bits_per_hash);
                 let hash_accumulators = hash_values
