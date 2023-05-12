@@ -20,7 +20,7 @@ pub(crate) trait ByteSelectorInstructions<F: PrimeField> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ByteSelectorConfig {
+pub(crate) struct ByteSelectorChipConfig {
     byte_decomposition: Column<Advice>,
     lookup_index: Column<Advice>,
     byte_index: Column<Advice>,
@@ -37,12 +37,12 @@ pub(crate) struct ByteSelectorConfig {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ByteSelectorChip<F: PrimeField> {
-    config: ByteSelectorConfig,
+    config: ByteSelectorChipConfig,
     _marker: PhantomData<F>,
 }
 
 impl<F: PrimeField> ByteSelectorChip<F> {
-    pub(crate) fn construct(config: ByteSelectorConfig) -> Self {
+    pub(crate) fn construct(config: ByteSelectorChipConfig) -> Self {
         Self {
             config,
             _marker: PhantomData,
@@ -58,7 +58,7 @@ impl<F: PrimeField> ByteSelectorChip<F> {
         selector_acc: Column<Advice>,
         byte_acc: Column<Advice>,
         byte_table: TableColumn,
-    ) -> ByteSelectorConfig {
+    ) -> ByteSelectorChipConfig {
         let byte_decomposition_selector = meta.complex_selector();
         let is_bit_selector = meta.selector();
         let selector_acc_selector = meta.selector();
@@ -130,7 +130,7 @@ impl<F: PrimeField> ByteSelectorChip<F> {
             )
         });
 
-        ByteSelectorConfig {
+        ByteSelectorChipConfig {
             byte_decomposition,
             lookup_index,
             byte_index,
@@ -329,7 +329,7 @@ mod tests {
         plonk::{Circuit, Column, Instance, TableColumn},
     };
 
-    use super::{ByteSelectorChip, ByteSelectorConfig, ByteSelectorInstructions};
+    use super::{ByteSelectorChip, ByteSelectorChipConfig, ByteSelectorInstructions};
 
     #[derive(Default)]
     struct MyCircuit<F: PrimeField> {
@@ -341,7 +341,7 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct Config {
-        config: ByteSelectorConfig,
+        config: ByteSelectorChipConfig,
         instance: Column<Instance>,
         table_column: TableColumn,
     }

@@ -9,9 +9,9 @@ use ndarray::Array2;
 
 #[derive(Debug)]
 pub struct LookupResult<F: PrimeField> {
-    word: AssignedCell<F, F>,
-    byte_index: AssignedCell<F, F>,
-    bit_index: AssignedCell<F, F>,
+    pub word: AssignedCell<F, F>,
+    pub byte_index: AssignedCell<F, F>,
+    pub bit_index: AssignedCell<F, F>,
 }
 
 pub(crate) trait ArrayLookupInstructions<F: PrimeField> {
@@ -66,6 +66,10 @@ impl<F: PrimeField> ArrayLookupChip<F> {
             // Set to None initially, have to call load() before synthesis
             bloom_filter_words: None,
         }
+    }
+
+    pub fn bytes_per_word(&self) -> usize {
+        1 << self.config.array_lookup_config.word_index_bits
     }
 
     pub(crate) fn configure(

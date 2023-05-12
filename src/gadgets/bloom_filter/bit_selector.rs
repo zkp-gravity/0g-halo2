@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use ff::PrimeField;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Selector, TableColumn},
     poly::Rotation,
 };
@@ -19,26 +19,71 @@ pub trait BitSelectorInstructions<F: PrimeField> {
 }
 
 #[derive(Clone, Debug)]
-pub struct BitSelectorConfig {
+pub struct BitSelectorChipConfig {
     byte: Column<Advice>,
     index: Column<Advice>,
     bit: Column<Advice>,
+
+    /// Column of all bytes. Public so that it can be reused by other gadgets.
+    pub byte_column: TableColumn,
+    index_column: TableColumn,
+    bit_column: TableColumn,
 
     lookup_selector: Selector,
 }
 
 pub struct BitSelectorChip<F: PrimeField> {
-    config: BitSelectorConfig,
+    config: BitSelectorChipConfig,
 
     _marker: PhantomData<F>,
 }
 
 impl<F: PrimeField> BitSelectorChip<F> {
-    pub fn construct(config: BitSelectorConfig) -> Self {
+    pub fn construct(config: BitSelectorChipConfig) -> Self {
         Self {
             config,
             _marker: PhantomData,
         }
+    }
+
+    pub(crate) fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        layouter.assign_table(
+            || "byte,index,bit",
+            |mut table| {
+                let mut table_index = 0;
+                for b in 0..(1 << 8) {
+                    for i in 0..8 {
+                        let bit = if b & (1 << (7 - i)) == 0 {
+                            F::ZERO
+                        } else {
+                            F::ONE
+                        };
+
+                        table.assign_cell(
+                            || "byte",
+                            self.config.byte_column,
+                            table_index,
+                            || Value::known(F::from(b as u64)),
+                        )?;
+                        table.assign_cell(
+                            || "index",
+                            self.config.index_column,
+                            table_index,
+                            || Value::known(F::from(i as u64)),
+                        )?;
+                        table.assign_cell(
+                            || "bit",
+                            self.config.bit_column,
+                            table_index,
+                            || Value::known(bit),
+                        )?;
+
+                        table_index += 1;
+                    }
+                }
+                Ok(())
+            },
+        )
     }
 
     pub fn configure(
@@ -46,11 +91,11 @@ impl<F: PrimeField> BitSelectorChip<F> {
         byte: Column<Advice>,
         index: Column<Advice>,
         bit: Column<Advice>,
-        byte_column: TableColumn,
-        index_column: TableColumn,
-        bit_column: TableColumn,
-    ) -> BitSelectorConfig {
+    ) -> BitSelectorChipConfig {
         let lookup_selector = meta.complex_selector();
+        let byte_column = meta.lookup_table_column();
+        let index_column = meta.lookup_table_column();
+        let bit_column = meta.lookup_table_column();
 
         meta.lookup("bit_lookup", |meta| {
             let lookup_selector = meta.query_selector(lookup_selector);
@@ -66,10 +111,13 @@ impl<F: PrimeField> BitSelectorChip<F> {
             ]
         });
 
-        BitSelectorConfig {
+        BitSelectorChipConfig {
             byte,
             index,
             bit,
+            byte_column,
+            index_column,
+            bit_column,
             lookup_selector,
         }
     }
@@ -114,10 +162,10 @@ mod tests {
     use halo2_proofs::{
         circuit::{SimpleFloorPlanner, Value},
         dev::MockProver,
-        plonk::{Circuit, Column, Instance, TableColumn},
+        plonk::{Circuit, Column, Instance},
     };
 
-    use super::{BitSelectorChip, BitSelectorConfig, BitSelectorInstructions};
+    use super::{BitSelectorChip, BitSelectorChipConfig, BitSelectorInstructions};
 
     #[derive(Default)]
     struct MyCircuit<F: PrimeField> {
@@ -128,11 +176,8 @@ mod tests {
 
     #[derive(Clone, Debug)]
     struct Config {
-        config: BitSelectorConfig,
+        config: BitSelectorChipConfig,
         instance: Column<Instance>,
-        byte_column: TableColumn,
-        index_column: TableColumn,
-        bit_column: TableColumn,
     }
 
     impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
@@ -150,9 +195,6 @@ mod tests {
             let bit = meta.advice_column();
 
             let instance = meta.instance_column();
-            let byte_column = meta.lookup_table_column();
-            let index_column = meta.lookup_table_column();
-            let bit_column = meta.lookup_table_column();
 
             meta.enable_equality(instance);
             meta.enable_equality(byte);
@@ -160,19 +202,8 @@ mod tests {
             meta.enable_equality(bit);
 
             Config {
-                config: BitSelectorChip::configure(
-                    meta,
-                    byte,
-                    index,
-                    bit,
-                    byte_column,
-                    index_column,
-                    bit_column,
-                ),
+                config: BitSelectorChip::configure(meta, byte, index, bit),
                 instance,
-                byte_column,
-                index_column,
-                bit_column,
             }
         }
 
@@ -200,45 +231,8 @@ mod tests {
                 },
             )?;
 
-            layouter.assign_table(
-                || "byte,index,bit",
-                |mut table| {
-                    let mut table_index = 0;
-                    for b in 0..(1 << 8) {
-                        for i in 0..8 {
-                            let bit = if b & (1 << (7 - i)) == 0 {
-                                F::ZERO
-                            } else {
-                                F::ONE
-                            };
-
-                            table.assign_cell(
-                                || "byte",
-                                config.byte_column,
-                                table_index,
-                                || Value::known(F::from(b as u64)),
-                            )?;
-                            table.assign_cell(
-                                || "index",
-                                config.index_column,
-                                table_index,
-                                || Value::known(F::from(i as u64)),
-                            )?;
-                            table.assign_cell(
-                                || "bit",
-                                config.bit_column,
-                                table_index,
-                                || Value::known(bit),
-                            )?;
-
-                            table_index += 1;
-                        }
-                    }
-                    Ok(())
-                },
-            )?;
-
-            let chip = BitSelectorChip::construct(config.config);
+            let mut chip = BitSelectorChip::construct(config.config);
+            chip.load(&mut layouter);
             let result = chip.select_bit(&mut layouter, byte_cell, index_cell)?;
 
             layouter.constrain_instance(result.cell(), config.instance, 0)?;

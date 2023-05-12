@@ -8,10 +8,8 @@ use halo2_proofs::{
 use ndarray::{array, Array3};
 
 use crate::gadgets::{
-    bloom_filter::single_bit_bloom_filter::{
-        BloomFilterChip, BloomFilterChipConfig, BloomFilterConfig,
-    },
-    bloom_filter::BloomFilterInstructions,
+    bloom_filter::single_bit_bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
+    bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
     hash::{HashChip, HashConfig, HashInstructions},
     response_accumulator::ResponseAccumulatorInstructions,
 };

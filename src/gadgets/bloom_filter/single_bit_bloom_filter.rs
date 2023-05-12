@@ -16,15 +16,7 @@ use halo2_proofs::{
 };
 use ndarray::Array2;
 
-use super::BloomFilterInstructions;
-
-#[derive(Debug, Clone)]
-pub(crate) struct BloomFilterConfig {
-    /// Number of hashes per bloom filter
-    pub(crate) n_hashes: usize,
-
-    pub(crate) bits_per_hash: usize,
-}
+use super::{BloomFilterInstructions, BloomFilterConfig};
 
 #[derive(Debug, Clone)]
 pub(crate) struct BloomFilterChipConfig {
