@@ -1,12 +1,8 @@
-use crate::utils::{
-    decompose_word_be, enable_range, from_be_bits, to_u32,
-};
+use crate::utils::{decompose_word_be, enable_range, from_be_bits, to_u32};
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
-    plonk::{
-        Advice, Column, ConstraintSystem, Error, Expression, Selector, TableColumn,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector, TableColumn},
     poly::Rotation,
 };
 use ndarray::Array2;
@@ -515,24 +511,34 @@ mod tests {
         //     bits_per_hash: 8,
         //     word_index_bits: 2,
         // };
+        // This means that the bloom filter array has 2^8 = 256 bits per hash,
+        // or 4 64-bit words per hash.
+        // Here, we construct two bloom filter arrays
 
-        let word0 = Fp::from(0x1122334455667788u64);
-        let word1 = Fp::from(0x99aabbccddeeff00u64);
-        let word2 = Fp::from(0xbabababababababau64);
-        let word3 = Fp::from(0x0123456789abcdefu64);
+        let words = vec![
+            Fp::from(0x1122334455667788u64),
+            Fp::from(0x99aabbccddeeff00u64),
+            Fp::from(0xbabababababababau64),
+            Fp::from(0x0123456789abcdefu64),
+            Fp::from(0x1111111111111111u64),
+            Fp::from(0x2222222222222222u64),
+            Fp::from(0x3333333333333333u64),
+            Fp::from(0x4444444444444444u64),
+        ];
 
-        let mut bits = to_be_bits(&word0, 64);
-        bits.append(&mut to_be_bits(&word1, 64));
-        bits.append(&mut to_be_bits(&word2, 64));
-        bits.append(&mut to_be_bits(&word3, 64));
+        let bits = words.iter().fold(vec![], |acc, word| {
+            let mut acc = acc;
+            acc.append(&mut to_be_bits(word, 64));
+            acc
+        });
 
-        let bloom_filter_arrays = Array2::from_shape_vec((1, 256), bits).unwrap();
+        let bloom_filter_arrays = Array2::from_shape_vec((2, 256), bits).unwrap();
 
-        (vec![word0, word1, word2, word3], bloom_filter_arrays)
+        (words, bloom_filter_arrays)
     }
 
     #[test]
-    fn test() {
+    fn test_bloom_index_0() {
         let k = 10;
 
         let (words, bloom_filter_arrays) = make_bloom_filter_array();
@@ -548,6 +554,54 @@ mod tests {
             Fp::from(0b001u64),
             Fp::from(0b101u64),
             Fp::from(words[0]),
+            Fp::from(0b111u64),
+            Fp::from(0b000u64),
+        ];
+        let prover = MockProver::run(k, &circuit, vec![output]).unwrap();
+        prover.assert_satisfied();
+    }
+
+    #[test]
+    fn test_bloom_index_0_same_word() {
+        let k = 10;
+
+        let (words, bloom_filter_arrays) = make_bloom_filter_array();
+
+        let circuit = MyCircuit::<Fp> {
+            input: 0b_11_001_101_11_111_000,
+            bloom_index: 0,
+            bloom_filter_arrays,
+            _marker: PhantomData,
+        };
+        let output = vec![
+            Fp::from(words[3]),
+            Fp::from(0b001u64),
+            Fp::from(0b101u64),
+            Fp::from(words[3]),
+            Fp::from(0b111u64),
+            Fp::from(0b000u64),
+        ];
+        let prover = MockProver::run(k, &circuit, vec![output]).unwrap();
+        prover.assert_satisfied();
+    }
+
+    #[test]
+    fn test_bloom_index_1() {
+        let k = 10;
+
+        let (words, bloom_filter_arrays) = make_bloom_filter_array();
+
+        let circuit = MyCircuit::<Fp> {
+            input: 0b_01_001_101_00_111_000,
+            bloom_index: 1,
+            bloom_filter_arrays,
+            _marker: PhantomData,
+        };
+        let output = vec![
+            Fp::from(words[5]),
+            Fp::from(0b001u64),
+            Fp::from(0b101u64),
+            Fp::from(words[4]),
             Fp::from(0b111u64),
             Fp::from(0b000u64),
         ];
