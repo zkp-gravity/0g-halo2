@@ -16,14 +16,7 @@ use halo2_proofs::{
 };
 use ndarray::Array2;
 
-pub(crate) trait BloomFilterInstructions<F: PrimeField> {
-    fn bloom_lookup(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        hash_value: AssignedCell<F, F>,
-        bloom_index: F,
-    ) -> Result<AssignedCell<F, F>, Error>;
-}
+use super::BloomFilterInstructions;
 
 #[derive(Debug, Clone)]
 pub(crate) struct BloomFilterConfig {
@@ -549,10 +542,11 @@ mod tests {
     fn plot() {
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new("bloom-filter-layout.png", (1024, 1024)).into_drawing_area();
+        let root = BitMapBackend::new("single-bit-bloom-filter-layout.png", (1024, 1024))
+            .into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root
-            .titled("Bloom filter Layout", ("sans-serif", 60))
+            .titled("Single Bit Bloom filter Layout", ("sans-serif", 60))
             .unwrap();
 
         let circuit = MyCircuit::<Fp> {
