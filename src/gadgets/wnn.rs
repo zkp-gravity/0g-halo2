@@ -8,7 +8,7 @@ use halo2_proofs::{
 use ndarray::{array, Array3};
 
 use crate::gadgets::{
-    bloom_filter::single_bit_bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
+    bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
     bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
     hash::{HashChip, HashConfig, HashInstructions},
     response_accumulator::ResponseAccumulatorInstructions,
@@ -55,7 +55,7 @@ impl<F: PrimeField> WnnChip<F> {
 
     fn configure(
         meta: &mut ConstraintSystem<F>,
-        advice_columns: [Column<Advice>; 5],
+        advice_columns: [Column<Advice>; 6],
         wnn_config: WnnConfig,
     ) -> WnnChipConfig {
         let hash_chip_config = HashChip::configure(
@@ -69,15 +69,18 @@ impl<F: PrimeField> WnnChip<F> {
         );
         let bloom_filter_chip_config = BloomFilterChip::configure(
             meta,
+            advice_columns,
+            wnn_config.bloom_filter_config.clone(),
+        );
+        let five_columns = [
             advice_columns[0],
             advice_columns[1],
             advice_columns[2],
             advice_columns[3],
             advice_columns[4],
-            wnn_config.bloom_filter_config.clone(),
-        );
+        ];
         let response_accumulator_chip_config =
-            ResponseAccumulatorChip::configure(meta, advice_columns);
+            ResponseAccumulatorChip::configure(meta, five_columns);
         WnnChipConfig {
             hash_chip_config,
             bloom_filter_chip_config,
@@ -95,9 +98,18 @@ impl<F: PrimeField> WnnInstructions<F> for WnnChip<F> {
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         assert_eq!(bloom_filter_arrays.shape()[1], inputs.len());
 
+        // Flatten array: from shape (N, C, B) to (N * C, B)
+        let shape = bloom_filter_arrays.shape();
+        let bloom_filter_arrays_flat = bloom_filter_arrays
+            .clone()
+            .into_shape((shape[0] * shape[1], shape[2]))
+            .unwrap();
+
         let hash_chip = HashChip::construct(self.config.hash_chip_config.clone());
-        let mut bloom_filter_chip =
-            BloomFilterChip::<F>::construct(self.config.bloom_filter_chip_config.clone());
+        let mut bloom_filter_chip = BloomFilterChip::<F>::construct(
+            self.config.bloom_filter_chip_config.clone(),
+            bloom_filter_arrays_flat,
+        );
         let response_accumulator_chip = ResponseAccumulatorChip::<F>::construct(
             self.config.response_accumulator_chip_config.clone(),
         );
@@ -108,14 +120,7 @@ impl<F: PrimeField> WnnInstructions<F> for WnnChip<F> {
             .collect::<Result<Vec<_>, _>>()?;
 
         let n_classes = bloom_filter_arrays.shape()[0];
-
-        // Flatten array: from shape (N, C, B) to (N * C, B)
-        let shape = bloom_filter_arrays.shape();
-        let bloom_filter_arrays_flat = bloom_filter_arrays
-            .clone()
-            .into_shape((shape[0] * shape[1], shape[2]))
-            .unwrap();
-        bloom_filter_chip.load(layouter, bloom_filter_arrays_flat)?;
+        bloom_filter_chip.load(layouter)?;
 
         let mut responses = vec![];
         for c in 0..n_classes {
@@ -215,6 +220,7 @@ impl<F: PrimeField> Circuit<F> for WnnCircuit<F> {
         let instance_column = meta.instance_column();
 
         let advice_columns = [
+            meta.advice_column(),
             meta.advice_column(),
             meta.advice_column(),
             meta.advice_column(),

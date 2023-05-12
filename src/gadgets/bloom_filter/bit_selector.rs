@@ -232,7 +232,7 @@ mod tests {
             )?;
 
             let mut chip = BitSelectorChip::construct(config.config);
-            chip.load(&mut layouter);
+            chip.load(&mut layouter)?;
             let result = chip.select_bit(&mut layouter, byte_cell, index_cell)?;
 
             layouter.constrain_instance(result.cell(), config.instance, 0)?;
