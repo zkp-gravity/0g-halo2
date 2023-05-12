@@ -1,16 +1,17 @@
-use std::marker::PhantomData;
-
-use crate::utils::{decompose_word_be, enable_range, from_be_bits, to_u32};
+use crate::utils::{
+    decompose_word_be, enable_range, from_be_bits, to_u32,
+};
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{
-        Advice, Column, ConstraintSystem, Constraints, Error, Expression, Selector, TableColumn,
+        Advice, Column, ConstraintSystem, Error, Expression, Selector, TableColumn,
     },
     poly::Rotation,
 };
 use ndarray::Array2;
 
+#[derive(Debug)]
 pub struct LookupResult<F: PrimeField> {
     word: AssignedCell<F, F>,
     byte_index: AssignedCell<F, F>,
@@ -48,7 +49,6 @@ pub(crate) struct ArrayLookupChipConfig {
     bloom_index: Column<Advice>,
     bloom_value: Column<Advice>,
 
-    validate_hash_decomposition_selector: Selector,
     bloom_filter_lookup_selector: Selector,
 
     table_bloom_index: TableColumn,
@@ -60,8 +60,7 @@ pub(crate) struct ArrayLookupChipConfig {
 
 pub(crate) struct ArrayLookupChip<F: PrimeField> {
     config: ArrayLookupChipConfig,
-    bloom_filter_arrays: Option<Array2<bool>>,
-    _marker: PhantomData<F>,
+    bloom_filter_words: Option<Vec<Vec<F>>>,
 }
 
 impl<F: PrimeField> ArrayLookupChip<F> {
@@ -69,8 +68,7 @@ impl<F: PrimeField> ArrayLookupChip<F> {
         ArrayLookupChip {
             config,
             // Set to None initially, have to call load() before synthesis
-            bloom_filter_arrays: None,
-            _marker: PhantomData,
+            bloom_filter_words: None,
         }
     }
 
@@ -84,26 +82,6 @@ impl<F: PrimeField> ArrayLookupChip<F> {
         bloom_filter_config: ArrayLookupConfig,
     ) -> ArrayLookupChipConfig {
         assert!(bloom_filter_config.bits_per_hash <= 32);
-
-        let validate_hash_decomposition_selector = meta.selector();
-        meta.create_gate("validate_hash_decomposition", |meta| {
-            let selector = meta.query_selector(validate_hash_decomposition_selector);
-
-            let hash_decomposition_cur = meta.query_advice(hash_decomposition, Rotation::cur());
-            let hash_decomposition_next = meta.query_advice(hash_decomposition, Rotation::next());
-            let byte_index = meta.query_advice(byte_index, Rotation::cur());
-            let bit_index = meta.query_advice(bit_index, Rotation::cur());
-
-            let shift_multiplier = F::from(1 << bloom_filter_config.bits_per_hash);
-            let two_pow_3 = F::from(1 << 3);
-            Constraints::with_selector(
-                selector,
-                vec![
-                    hash_decomposition_next * shift_multiplier + byte_index * two_pow_3 + bit_index
-                        - hash_decomposition_cur,
-                ],
-            )
-        });
 
         let table_bloom_index = meta.lookup_table_column();
         let table_word_index = meta.lookup_table_column();
@@ -158,7 +136,6 @@ impl<F: PrimeField> ArrayLookupChip<F> {
             bloom_value,
 
             // Selectors
-            validate_hash_decomposition_selector,
             bloom_filter_lookup_selector,
 
             // Table Columns
@@ -179,8 +156,17 @@ impl<F: PrimeField> ArrayLookupChip<F> {
         let bloom_filter_length = 1 << config.bits_per_hash;
         assert_eq!(bloom_filter_arrays.shape()[1], bloom_filter_length);
 
-        let word_length = config.word_index_bits - config.word_index_bits;
+        let word_length = 1 << (config.bits_per_hash - config.word_index_bits);
         assert_eq!(bloom_filter_arrays.shape()[1] % word_length, 0);
+
+        let bloom_filter_words = (0..bloom_filter_arrays.shape()[0])
+            .map(|i| {
+                let bits = bloom_filter_arrays.row(i).to_vec();
+                bits.chunks_exact(word_length)
+                    .map(|word_bits| from_be_bits::<F>(&word_bits))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
 
         layouter.assign_table(
             || "bloom_filters",
@@ -188,10 +174,7 @@ impl<F: PrimeField> ArrayLookupChip<F> {
                 let mut offset = 0usize;
 
                 for bloom_index in 0..bloom_filter_arrays.shape()[0] {
-                    let bits = bloom_filter_arrays.row(bloom_index).to_vec();
-                    for word_bits in bits.chunks_exact(word_length) {
-                        let word = Value::known(from_be_bits::<F>(&word_bits));
-
+                    for (i, word) in bloom_filter_words[bloom_index].iter().enumerate() {
                         table.assign_cell(
                             || "bloom_index",
                             self.config.table_bloom_index,
@@ -200,21 +183,34 @@ impl<F: PrimeField> ArrayLookupChip<F> {
                         )?;
 
                         table.assign_cell(
+                            || "word_index",
+                            self.config.table_word_index,
+                            offset,
+                            || Value::known(F::from(i as u64)),
+                        )?;
+
+                        table.assign_cell(
                             || "bloom_value",
                             self.config.table_bloom_value,
                             offset,
-                            || word,
+                            || Value::known(*word),
                         )?;
 
                         offset += 1;
                     }
                 }
 
+                // As a default value, add the tuple (-1, -1, -1) to the table
+                let v = || Value::known(-F::ONE);
+                table.assign_cell(|| "bloom_index", self.config.table_bloom_index, offset, v)?;
+                table.assign_cell(|| "word_index", self.config.table_word_index, offset, v)?;
+                table.assign_cell(|| "bloom_value", self.config.table_bloom_value, offset, v)?;
+
                 Ok(())
             },
         )?;
 
-        self.bloom_filter_arrays = Some(bloom_filter_arrays);
+        self.bloom_filter_words = Some(bloom_filter_words);
         Ok(())
     }
 }
@@ -233,63 +229,64 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
                 let bits_per_hash = self.config.array_lookup_config.bits_per_hash;
                 let word_index_bits = self.config.array_lookup_config.word_index_bits;
 
-                let bloom_filter_arrays = self
-                    .bloom_filter_arrays
+                let bloom_filter_words = self
+                    .bloom_filter_words
                     .as_ref()
                     .expect("Should call load() before bloom_lookup()!");
 
                 // Compute values to put in cells
-                let hash_values = hash_value
-                    .value()
-                    .map(|hash_value| decompose_word_be(hash_value, n_hashes, bits_per_hash));
-
-                let index_values: Value<Vec<(F, F, F)>> = hash_values.clone().map(|hash_values| {
-                    hash_values
-                        .iter()
-                        .map(|hash_value| {
-                            // Decompose hash into 3 index values
-                            let hash_value = to_u32(hash_value);
-                            let n_bits_byte_and_bit_indices = bits_per_hash - word_index_bits;
-                            let byte_and_bit_index_mask = 1 << n_bits_byte_and_bit_indices - 1;
-
-                            let word_index = hash_value >> n_bits_byte_and_bit_indices;
-                            let byte_index = (hash_value & byte_and_bit_index_mask) >> 3;
-                            let bit_index = hash_value & 0b111;
-                            (
-                                F::from(word_index as u64),
-                                F::from(byte_index as u64),
-                                F::from(bit_index as u64),
-                            )
-                        })
-                        .collect()
+                // The hash decomposition wors on assuming a little endian representation of the hash value,
+                // so we reverse the hash values here
+                let hash_values_le = hash_value.value().map(|hash_value| {
+                    decompose_word_be(hash_value, n_hashes, bits_per_hash)
+                        .into_iter()
+                        .rev()
+                        .collect::<Vec<_>>()
                 });
+
+                let index_values: Value<Vec<(F, F, F)>> =
+                    hash_values_le.clone().map(|hash_values| {
+                        hash_values
+                            .iter()
+                            .map(|hash_value| {
+                                // Decompose hash into 3 index values
+                                let hash_value = to_u32(hash_value);
+                                let n_bits_byte_and_bit_indices = bits_per_hash - word_index_bits;
+                                let byte_and_bit_index_mask =
+                                    (1 << n_bits_byte_and_bit_indices) - 1;
+
+                                let word_index = hash_value >> n_bits_byte_and_bit_indices;
+                                let byte_index = (hash_value & byte_and_bit_index_mask) >> 3;
+                                let bit_index = hash_value & 0b111;
+                                (
+                                    F::from(word_index as u64),
+                                    F::from(byte_index as u64),
+                                    F::from(bit_index as u64),
+                                )
+                            })
+                            .collect()
+                    });
 
                 let bloom_values = index_values
                     .clone()
                     .map(|index_values| {
                         let bloom_index = to_u32(&bloom_index) as usize;
-                        let bloom_values: Vec<F> = index_values
+                        index_values
                             .iter()
                             .map(|(word_index, _, _)| {
                                 let word_index = to_u32(word_index) as usize;
-                                let bloom_value = bloom_filter_arrays[(bloom_index, word_index)];
-                                if bloom_value {
-                                    F::ONE
-                                } else {
-                                    F::ZERO
-                                }
+                                bloom_filter_words[bloom_index][word_index]
                             })
-                            .collect();
-                        bloom_values
+                            .collect::<Vec<_>>()
                     })
                     .transpose_vec(n_hashes);
 
-                let hash_values = hash_values.transpose_vec(n_hashes);
+                let hash_values_le = hash_values_le.transpose_vec(n_hashes);
                 let index_values = index_values.transpose_vec(n_hashes);
 
                 let mut hash_decomposition = vec![hash_value.value_field().evaluate()];
                 let shift_factor = F::from(1 << bits_per_hash).invert().unwrap();
-                for hash in hash_values {
+                for hash in hash_values_le {
                     let prev = hash_decomposition[hash_decomposition.len() - 1];
                     hash_decomposition.push(
                         hash.zip(prev)
@@ -357,11 +354,6 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
 
                 enable_range(
                     &mut region,
-                    self.config.validate_hash_decomposition_selector,
-                    0..n_hashes,
-                )?;
-                enable_range(
-                    &mut region,
                     self.config.bloom_filter_lookup_selector,
                     0..n_hashes,
                 )?;
@@ -370,6 +362,7 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
                     .into_iter()
                     .zip(bit_index_cells)
                     .zip(bloom_value_cells)
+                    .rev() // Reverse order so that results are returned assuming a big endian decomposition
                     .map(|((byte_index, bit_index), bloom_value)| LookupResult {
                         word: bloom_value,
                         byte_index,
@@ -392,7 +385,7 @@ mod tests {
         halo2curves::bn256::Fr as Fp,
         plonk::{Advice, Circuit, Column, Instance},
     };
-    use ndarray::{array, Array2};
+    use ndarray::Array2;
 
     use crate::utils::to_be_bits;
 
@@ -445,7 +438,7 @@ mod tests {
 
             let bloom_filter_config = ArrayLookupConfig {
                 n_hashes: 2,
-                bits_per_hash: 4,
+                bits_per_hash: 8,
                 word_index_bits: 2,
             };
             let bloom_filter_chip_config = ArrayLookupChip::configure(
@@ -493,8 +486,7 @@ mod tests {
 
             assert_eq!(results.len(), 2);
 
-            let mut i = 0;
-            for lookup_result in results {
+            for (i, lookup_result) in results.iter().enumerate() {
                 layouter.constrain_instance(
                     lookup_result.word.cell(),
                     config.instance,
@@ -510,17 +502,13 @@ mod tests {
                     config.instance,
                     3 * i + 2,
                 )?;
-                i += 3;
             }
 
             Ok(())
         }
     }
 
-    #[test]
-    fn test() {
-        let k = 4;
-
+    fn make_bloom_filter_array() -> (Vec<Fp>, Array2<bool>) {
         // The array lookup config is:
         // let bloom_filter_config = ArrayLookupConfig {
         //     n_hashes: 2,
@@ -540,6 +528,15 @@ mod tests {
 
         let bloom_filter_arrays = Array2::from_shape_vec((1, 256), bits).unwrap();
 
+        (vec![word0, word1, word2, word3], bloom_filter_arrays)
+    }
+
+    #[test]
+    fn test() {
+        let k = 10;
+
+        let (words, bloom_filter_arrays) = make_bloom_filter_array();
+
         let circuit = MyCircuit::<Fp> {
             input: 0b_01_001_101_00_111_000,
             bloom_index: 0,
@@ -547,10 +544,10 @@ mod tests {
             _marker: PhantomData,
         };
         let output = vec![
-            Fp::from(word1),
+            Fp::from(words[1]),
             Fp::from(0b001u64),
             Fp::from(0b101u64),
-            Fp::from(word0),
+            Fp::from(words[0]),
             Fp::from(0b111u64),
             Fp::from(0b000u64),
         ];
@@ -562,16 +559,17 @@ mod tests {
     fn plot() {
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new("bloom-filter-layout.png", (1024, 1024)).into_drawing_area();
+        let root = BitMapBackend::new("array-lookup-layout.png", (1024, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root
-            .titled("Bloom filter Layout", ("sans-serif", 60))
+            .titled("Array lookup Layout", ("sans-serif", 60))
             .unwrap();
 
+        let (_, bloom_filter_arrays) = make_bloom_filter_array();
         let circuit = MyCircuit::<Fp> {
             input: 2,
             bloom_index: 0,
-            bloom_filter_arrays: array![[true, false, false, true]],
+            bloom_filter_arrays,
             _marker: PhantomData,
         };
         halo2_proofs::dev::CircuitLayout::default()
