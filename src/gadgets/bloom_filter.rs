@@ -84,12 +84,21 @@ impl<F: PrimeField> BloomFilterChip<F> {
         advice_columns: [Column<Advice>; 6],
         bloom_filter_config: BloomFilterConfig,
     ) -> BloomFilterChipConfig {
-        // word_index_bits trades off the number of advice rows and the number of table rows:
-        // - The number of advice rows is roughly 2^word_index_bits
-        // - The number of table rows is roughly 2^(bits_per_hash - word_index_bits - 3)
+        // word_index_bits trades off the number of advice rows and the number of table rows.
+        // For each bloom filter, we have:
+        // - The number of advice rows is roughly n_hashes * 2^byte_index_bits for the byte lookup
+        // - The number of table rows is roughly 2^(bits_per_hash - byte_index_bits - 3)
         // Ideally, we'll want to balance the two, but since we'll need more advice rows
         // for other things, we should prioritize fewer advice rows.
-        let word_index_bits = (bloom_filter_config.bits_per_hash - 3) / 2;
+        let byte_index_bits = ((bloom_filter_config.bits_per_hash as f32 - 3.0) / 2.0
+            - (bloom_filter_config.n_hashes as f32).log2().floor())
+            as usize;
+        let word_bits = byte_index_bits + 3;
+        let word_index_bits = bloom_filter_config.bits_per_hash - word_bits;
+        println!(
+            "Using words of {} bits with a byte address of {} bits!",
+            word_bits, word_index_bits
+        );
 
         let array_lookup_config = ArrayLookupConfig {
             n_hashes: bloom_filter_config.n_hashes,
@@ -362,7 +371,7 @@ mod tests {
         };
         halo2_proofs::dev::CircuitLayout::default()
             .show_labels(true)
-            .render(7, &circuit, &root)
+            .render(6, &circuit, &root)
             .unwrap();
     }
 }
