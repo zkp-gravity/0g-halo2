@@ -182,7 +182,7 @@ impl<F: PrimeField> WnnCircuit<F> {
     pub fn plot(&self, filename: &str, k: u32) {
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new(filename, (1024, 1024)).into_drawing_area();
+        let root = BitMapBackend::new(filename, (1024, 1 << (k + 3))).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root.titled("WNN Layout", ("sans-serif", 60)).unwrap();
         halo2_proofs::dev::CircuitLayout::default()
@@ -284,35 +284,24 @@ mod tests {
 
     use halo2_proofs::dev::MockProver;
     use halo2_proofs::halo2curves::bn256::Fr as Fp;
-    use ndarray::array;
+    use ndarray::Array3;
 
     use super::{WnnCircuit, WnnCircuitParams};
 
     const PARAMS: WnnCircuitParams = WnnCircuitParams {
-        p: 17,
-        l: 4,
+        p: (2 << 21) - 9,
+        l: 20,
         n_hashes: 2,
-        bits_per_hash: 2,
+        bits_per_hash: 10,
     };
 
     #[test]
     fn test() {
-        let k = 6;
-        let circuit = WnnCircuit::<Fp>::new(
-            vec![2, 7],
-            array![
-                [[true, false, true, false], [true, true, false, false],],
-                [[true, false, true, false], [true, true, false, true],],
-            ],
-            PARAMS,
-        );
+        let k = 13;
+        let bloom_filter_arrays = Array3::<u8>::ones((2, 2, 1024)).mapv(|_| true);
+        let circuit = WnnCircuit::<Fp>::new(vec![2, 7], bloom_filter_arrays, PARAMS);
 
-        // Expected result:
-        // - ((2^3 % 17) % 16) = 8 -> Indices 2 & 0
-        // - ((7^3 % 17) % 16) = 3 -> Indices 0 & 3
-        // - Class 0: 1 + 0 = 1
-        // - Class 1: 1 + 1 = 2
-        let expected_result = vec![Fp::from(1), Fp::from(2)];
+        let expected_result = vec![Fp::from(2), Fp::from(2)];
 
         let prover = MockProver::run(k, &circuit, vec![expected_result]).unwrap();
         prover.assert_satisfied();
@@ -320,14 +309,7 @@ mod tests {
 
     #[test]
     fn plot() {
-        WnnCircuit::<Fp>::new(
-            vec![2, 7],
-            array![
-                [[true, false, true, false], [true, true, false, false],],
-                [[true, false, true, false], [true, true, false, true],],
-            ],
-            PARAMS,
-        )
-        .plot("wnn-layout.png", 6);
+        let bloom_filter_arrays = Array3::<u8>::ones((2, 2, 1024)).mapv(|_| true);
+        WnnCircuit::<Fp>::new(vec![2, 7], bloom_filter_arrays, PARAMS).plot("wnn-layout.png", 8);
     }
 }
