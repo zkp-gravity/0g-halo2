@@ -146,30 +146,31 @@ pub struct WnnCircuitConfig {
     instance_column: Column<Instance>,
 }
 
-pub struct WnnCircuit<
-    F: PrimeField,
-    const P: u64,
-    const L: usize,
-    const N_HASHES: usize,
-    const BITS_PER_HASH: usize,
-> {
+#[derive(Clone)]
+pub struct WnnCircuitParams {
+    pub p: u64,
+    pub l: usize,
+    pub n_hashes: usize,
+    pub bits_per_hash: usize,
+}
+
+pub struct WnnCircuit<F: PrimeField> {
     inputs: Vec<u64>,
     bloom_filter_arrays: Array3<bool>,
+    params: WnnCircuitParams,
     _marker: PhantomData<F>,
 }
 
-impl<
-        F: PrimeField,
-        const P: u64,
-        const L: usize,
-        const N_HASHES: usize,
-        const BITS_PER_HASH: usize,
-    > WnnCircuit<F, P, L, N_HASHES, BITS_PER_HASH>
-{
-    pub fn new(inputs: Vec<u64>, bloom_filter_arrays: Array3<bool>) -> Self {
+impl<F: PrimeField> WnnCircuit<F> {
+    pub fn new(
+        inputs: Vec<u64>,
+        bloom_filter_arrays: Array3<bool>,
+        params: WnnCircuitParams,
+    ) -> Self {
         Self {
             inputs,
             bloom_filter_arrays,
+            params,
             _marker: PhantomData,
         }
     }
@@ -187,26 +188,31 @@ impl<
     }
 }
 
-impl<
-        F: PrimeField,
-        const P: u64,
-        const L: usize,
-        const N_HASHES: usize,
-        const BITS_PER_HASH: usize,
-    > Circuit<F> for WnnCircuit<F, P, L, N_HASHES, BITS_PER_HASH>
-{
+impl Default for WnnCircuitParams {
+    fn default() -> Self {
+        unimplemented!("Parameters have to be specified manually!")
+    }
+}
+
+impl<F: PrimeField> Circuit<F> for WnnCircuit<F> {
     type Config = WnnCircuitConfig;
     type FloorPlanner = SimpleFloorPlanner;
+    type Params = WnnCircuitParams;
 
     fn without_witnesses(&self) -> Self {
         Self {
             inputs: vec![],
             bloom_filter_arrays: array![[[]]],
+            params: self.params.clone(),
             _marker: PhantomData,
         }
     }
 
-    fn configure(meta: &mut halo2_proofs::plonk::ConstraintSystem<F>) -> Self::Config {
+    fn params(&self) -> Self::Params {
+        self.params.clone()
+    }
+
+    fn configure_with_params(meta: &mut ConstraintSystem<F>, params: Self::Params) -> Self::Config {
         let instance_column = meta.instance_column();
 
         let advice_columns = [
@@ -226,10 +232,13 @@ impl<
         meta.enable_constant(constants);
 
         let bloom_filter_config = BloomFilterConfig {
-            n_hashes: N_HASHES,
-            bits_per_hash: BITS_PER_HASH,
+            n_hashes: params.n_hashes,
+            bits_per_hash: params.bits_per_hash,
         };
-        let hash_function_config = HashFunctionConfig { p: P, l: L };
+        let hash_function_config = HashFunctionConfig {
+            p: params.p,
+            l: params.l,
+        };
         let wnn_config = WnnConfig {
             bloom_filter_config,
             hash_function_config,
@@ -259,29 +268,39 @@ impl<
 
         Ok(())
     }
+
+    fn configure(_meta: &mut ConstraintSystem<F>) -> Self::Config {
+        unimplemented!("configure_with_params should be used!")
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::marker::PhantomData;
 
     use halo2_proofs::dev::MockProver;
     use halo2_proofs::halo2curves::bn256::Fr as Fp;
     use ndarray::array;
 
-    use super::WnnCircuit;
+    use super::{WnnCircuit, WnnCircuitParams};
+
+    const PARAMS: WnnCircuitParams = WnnCircuitParams {
+        p: 17,
+        l: 4,
+        n_hashes: 2,
+        bits_per_hash: 2,
+    };
 
     #[test]
     fn test() {
         let k = 6;
-        let circuit = WnnCircuit::<Fp, 17, 4, 2, 2> {
-            inputs: vec![2, 7],
-            bloom_filter_arrays: array![
+        let circuit = WnnCircuit::<Fp>::new(
+            vec![2, 7],
+            array![
                 [[true, false, true, false], [true, true, false, false],],
                 [[true, false, true, false], [true, true, false, true],],
             ],
-            _marker: PhantomData,
-        };
+            PARAMS,
+        );
 
         // Expected result:
         // - ((2^3 % 17) % 16) = 8 -> Indices 2 & 0
@@ -296,14 +315,14 @@ mod tests {
 
     #[test]
     fn plot() {
-        WnnCircuit::<Fp, 17, 4, 2, 2> {
-            inputs: vec![2, 7],
-            bloom_filter_arrays: array![
+        WnnCircuit::<Fp>::new(
+            vec![2, 7],
+            array![
                 [[true, false, true, false], [true, true, false, false],],
                 [[true, false, true, false], [true, true, false, true],],
             ],
-            _marker: PhantomData,
-        }
+            PARAMS,
+        )
         .plot("wnn-layout.png", 6);
     }
 }
