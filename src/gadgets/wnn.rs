@@ -72,15 +72,8 @@ impl<F: PrimeField> WnnChip<F> {
             advice_columns,
             wnn_config.bloom_filter_config.clone(),
         );
-        let five_columns = [
-            advice_columns[0],
-            advice_columns[1],
-            advice_columns[2],
-            advice_columns[3],
-            advice_columns[4],
-        ];
         let response_accumulator_chip_config =
-            ResponseAccumulatorChip::configure(meta, five_columns);
+            ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
         WnnChipConfig {
             hash_chip_config,
             bloom_filter_chip_config,
@@ -98,7 +91,7 @@ impl<F: PrimeField> WnnInstructions<F> for WnnChip<F> {
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         assert_eq!(bloom_filter_arrays.shape()[1], inputs.len());
 
-        // Flatten array: from shape (N, C, B) to (N * C, B)
+        // Flatten array: from shape (C, N, B) to (C * N, B)
         let shape = bloom_filter_arrays.shape();
         let bloom_filter_arrays_flat = bloom_filter_arrays
             .clone()
@@ -289,7 +282,7 @@ mod tests {
     use super::{WnnCircuit, WnnCircuitParams};
 
     const PARAMS: WnnCircuitParams = WnnCircuitParams {
-        p: (2 << 21) - 9,
+        p: (1 << 21) - 9,
         l: 20,
         n_hashes: 2,
         bits_per_hash: 10,
@@ -298,10 +291,30 @@ mod tests {
     #[test]
     fn test() {
         let k = 13;
-        let bloom_filter_arrays = Array3::<u8>::ones((2, 2, 1024)).mapv(|_| true);
-        let circuit = WnnCircuit::<Fp>::new(vec![2, 7], bloom_filter_arrays, PARAMS);
+        let input = vec![2117, 30177];
+        // The input numbers hash to the following indices:
+        // - 2117 -> (2117^3) % (2^21 - 9) % (1024^2) = 260681
+        //   - 260681 % 1024 = 585
+        //   - 260681 // 1024 = 254
+        // - 30177 -> (30177^3) % (2^21 - 9) % (1024^2) = 260392
+        //   - 260392 % 1024 = 296
+        //   - 260392 // 1024 = 254
+        // We'll set the bloom filter such that we get one positive response for he first
+        // class and two positive responses for the second class.
+        let mut bloom_filter_arrays = Array3::<u8>::ones((3, 2, 1024)).mapv(|_| false);
+        // First class
+        bloom_filter_arrays[[0, 0, 585]] = true;
+        bloom_filter_arrays[[0, 0, 254]] = true;
+        bloom_filter_arrays[[0, 1, 296]] = true;
+        // Second class
+        bloom_filter_arrays[[1, 0, 585]] = true;
+        bloom_filter_arrays[[1, 0, 254]] = true;
+        bloom_filter_arrays[[1, 1, 296]] = true;
+        bloom_filter_arrays[[1, 1, 254]] = true;
 
-        let expected_result = vec![Fp::from(2), Fp::from(2)];
+        let circuit = WnnCircuit::<Fp>::new(input, bloom_filter_arrays, PARAMS);
+
+        let expected_result = vec![Fp::from(1), Fp::from(2)];
 
         let prover = MockProver::run(k, &circuit, vec![expected_result]).unwrap();
         prover.assert_satisfied();
