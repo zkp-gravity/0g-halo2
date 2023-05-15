@@ -32,7 +32,8 @@ pub struct Wnn<const P: u64, const L: usize, const N_HASHES: usize, const BITS_P
 
     /// Bloom filter array, shape (num_classes, num_inputs * bits_per_input / num_filter_inputs, num_filter_entries)
     bloom_filters: Array3<bool>,
-    input_order: Array1<u64>,
+    /// Permutation of input bits, shape (num_inputs * bits_per_input)
+    input_permutation: Array1<u64>,
     /// Thresholds for pixels, shape (width, height, bits_per_input)
     binarization_thresholds: Array3<f32>,
 }
@@ -58,13 +59,13 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
             num_filter_inputs,
             p,
             bloom_filters,
-            input_order,
+            input_permutation: input_order,
             binarization_thresholds,
         }
     }
 
     pub fn num_input_bits(&self) -> usize {
-        self.input_order.len()
+        self.input_permutation.len()
     }
 
     pub fn encode_image(&self, image: &Array2<u8>) -> Vec<bool> {
@@ -91,11 +92,11 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
     }
 
     fn compute_hash_inputs(&self, input_bits: Vec<bool>) -> Vec<u64> {
-        assert_eq!(input_bits.len(), self.input_order.shape()[0]);
+        assert_eq!(input_bits.len(), self.input_permutation.shape()[0]);
 
         // Permute inputs
         let inputs_permuted: Vec<bool> = self
-            .input_order
+            .input_permutation
             .iter()
             .map(|i| input_bits[*i as usize])
             .collect();
@@ -116,6 +117,7 @@ impl<const P: u64, const L: usize, const N_HASHES: usize, const BITS_PER_HASH: u
     pub fn predict(&self, image: &Array2<u8>) -> Vec<u32> {
         let input_bits = self.encode_image(image);
         let hash_inputs = self.compute_hash_inputs(input_bits);
+        // This asserts that the number of filter inputs does not exceed the number of bits in a u64
         assert_eq!(hash_inputs.len(), self.bloom_filters.shape()[1]);
 
         // Hash
