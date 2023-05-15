@@ -46,7 +46,7 @@ impl<F: PrimeField> BitSelectorChip<F> {
         }
     }
 
-    pub(crate) fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+    pub fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         layouter.assign_table(
             || "byte,index,bit",
             |mut table| {

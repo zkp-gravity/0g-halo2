@@ -16,10 +16,10 @@ use halo2_proofs::{
 };
 use ndarray::Array2;
 
-use super::{BloomFilterInstructions, BloomFilterConfig};
+use super::{BloomFilterConfig, BloomFilterInstructions};
 
 #[derive(Debug, Clone)]
-pub(crate) struct BloomFilterChipConfig {
+pub struct BloomFilterChipConfig {
     hashes: Column<Advice>,
     hash_accumulator: Column<Advice>,
     bloom_index: Column<Advice>,
@@ -37,14 +37,14 @@ pub(crate) struct BloomFilterChipConfig {
     bloom_filter_config: BloomFilterConfig,
 }
 
-pub(crate) struct BloomFilterChip<F: PrimeField> {
+pub struct BloomFilterChip<F: PrimeField> {
     config: BloomFilterChipConfig,
     bloom_filter_arrays: Option<Array2<bool>>,
     _marker: PhantomData<F>,
 }
 
 impl<F: PrimeField> BloomFilterChip<F> {
-    pub(crate) fn construct(config: BloomFilterChipConfig) -> Self {
+    pub fn construct(config: BloomFilterChipConfig) -> Self {
         BloomFilterChip {
             config,
             // Set to known initially, have to call load() before synthesis
@@ -53,7 +53,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
         }
     }
 
-    pub(crate) fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         hashes: Column<Advice>,
         hash_accumulator: Column<Advice>,
@@ -135,7 +135,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
         }
     }
 
-    pub(crate) fn load(
+    pub fn load(
         &mut self,
         layouter: &mut impl Layouter<F>,
         bloom_filter_arrays: Array2<bool>,

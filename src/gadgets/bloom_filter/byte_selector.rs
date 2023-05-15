@@ -9,7 +9,7 @@ use halo2_proofs::{
 
 use crate::utils::{decompose_word_be, enable_range, to_u32};
 
-pub(crate) trait ByteSelectorInstructions<F: PrimeField> {
+pub trait ByteSelectorInstructions<F: PrimeField> {
     fn select_byte(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -20,7 +20,7 @@ pub(crate) trait ByteSelectorInstructions<F: PrimeField> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ByteSelectorChipConfig {
+pub struct ByteSelectorChipConfig {
     byte_decomposition: Column<Advice>,
     lookup_index: Column<Advice>,
     byte_index: Column<Advice>,
@@ -36,20 +36,20 @@ pub(crate) struct ByteSelectorChipConfig {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ByteSelectorChip<F: PrimeField> {
+pub struct ByteSelectorChip<F: PrimeField> {
     config: ByteSelectorChipConfig,
     _marker: PhantomData<F>,
 }
 
 impl<F: PrimeField> ByteSelectorChip<F> {
-    pub(crate) fn construct(config: ByteSelectorChipConfig) -> Self {
+    pub fn construct(config: ByteSelectorChipConfig) -> Self {
         Self {
             config,
             _marker: PhantomData,
         }
     }
 
-    pub(crate) fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         byte_decomposition: Column<Advice>,
         lookup_index: Column<Advice>,

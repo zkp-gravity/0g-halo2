@@ -14,7 +14,7 @@ pub struct LookupResult<F: PrimeField> {
     pub bit_index: AssignedCell<F, F>,
 }
 
-pub(crate) trait ArrayLookupInstructions<F: PrimeField> {
+pub trait ArrayLookupInstructions<F: PrimeField> {
     /// Given a hash value and a bloom index, decomposes the hash, looks up the word in the bloom array
     /// and returns the word, byte index and bit index for each hash value
     fn array_lookup(
@@ -38,7 +38,7 @@ pub struct ArrayLookupConfig {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ArrayLookupChipConfig {
+pub struct ArrayLookupChipConfig {
     hash_decomposition: Column<Advice>,
     byte_index: Column<Advice>,
     bit_index: Column<Advice>,
@@ -54,16 +54,13 @@ pub(crate) struct ArrayLookupChipConfig {
     array_lookup_config: ArrayLookupConfig,
 }
 
-pub(crate) struct ArrayLookupChip<F: PrimeField> {
+pub struct ArrayLookupChip<F: PrimeField> {
     config: ArrayLookupChipConfig,
     bloom_filter_words: Vec<Vec<F>>,
 }
 
 impl<F: PrimeField> ArrayLookupChip<F> {
-    pub(crate) fn construct(
-        config: ArrayLookupChipConfig,
-        bloom_filter_arrays: Array2<bool>,
-    ) -> Self {
+    pub fn construct(config: ArrayLookupChipConfig, bloom_filter_arrays: Array2<bool>) -> Self {
         let bloom_filter_length = 1 << config.array_lookup_config.bits_per_hash;
         assert_eq!(bloom_filter_arrays.shape()[1], bloom_filter_length);
 
@@ -93,7 +90,7 @@ impl<F: PrimeField> ArrayLookupChip<F> {
             - 3)
     }
 
-    pub(crate) fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         hash_decomposition: Column<Advice>,
         byte_index: Column<Advice>,
@@ -168,7 +165,7 @@ impl<F: PrimeField> ArrayLookupChip<F> {
         }
     }
 
-    pub(crate) fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+    pub fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         layouter.assign_table(
             || "bloom_filters",
             |mut table| {

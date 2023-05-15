@@ -7,7 +7,7 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
-pub(crate) trait ResponseAccumulatorInstructions<F: PrimeField> {
+pub trait ResponseAccumulatorInstructions<F: PrimeField> {
     fn accumulate_responses(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -16,26 +16,26 @@ pub(crate) trait ResponseAccumulatorInstructions<F: PrimeField> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ResponseAccumulatorChipConfig {
+pub struct ResponseAccumulatorChipConfig {
     advice_columns: [Column<Advice>; 5],
     selector: Selector,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ResponseAccumulatorChip<F: PrimeField> {
+pub struct ResponseAccumulatorChip<F: PrimeField> {
     config: ResponseAccumulatorChipConfig,
     _marker: PhantomData<F>,
 }
 
 impl<F: PrimeField> ResponseAccumulatorChip<F> {
-    pub(crate) fn construct(config: ResponseAccumulatorChipConfig) -> Self {
+    pub fn construct(config: ResponseAccumulatorChipConfig) -> Self {
         Self {
             config,
             _marker: PhantomData,
         }
     }
 
-    pub(crate) fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         advice_columns: [Column<Advice>; 5],
     ) -> ResponseAccumulatorChipConfig {

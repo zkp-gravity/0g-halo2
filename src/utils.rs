@@ -8,18 +8,18 @@ use halo2_proofs::{
 use num_bigint::BigUint;
 
 #[allow(dead_code)]
-pub(crate) fn print_value<F: PrimeField>(name: &str, value: Value<&F>) {
+pub fn print_value<F: PrimeField>(name: &str, value: Value<&F>) {
     value.map(|x| println!("{name}: {:#01x}", to_u32(x)));
 }
 
 #[allow(dead_code)]
-pub(crate) fn print_values<F: PrimeField>(name: &str, values: &Vec<Value<F>>) {
+pub fn print_values<F: PrimeField>(name: &str, values: &Vec<Value<F>>) {
     values.iter().for_each(|value| {
         value.map(|x| println!("{name}: {:#01x}", to_u32(&x)));
     });
 }
 
-pub(crate) fn enable_range<F: PrimeField>(
+pub fn enable_range<F: PrimeField>(
     region: &mut Region<F>,
     selector: Selector,
     range: Range<usize>,
@@ -42,7 +42,7 @@ pub fn argmax(vec: &Vec<u32>) -> usize {
     index
 }
 
-pub(crate) fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
+pub fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
     let x_bigint = BigUint::from_bytes_le(x.to_repr().as_ref());
     let quotient = x_bigint / divisor;
 
@@ -86,7 +86,7 @@ pub fn from_be_bits<F: PrimeField>(bits: &[bool]) -> F {
     result
 }
 
-pub(crate) fn decompose_word_be<F: PrimeField>(
+pub fn decompose_word_be<F: PrimeField>(
     word: &F,
     num_windows: usize,
     window_num_bits: usize,
@@ -104,7 +104,7 @@ pub(crate) fn decompose_word_be<F: PrimeField>(
         .collect()
 }
 
-pub(crate) fn to_u32<F: PrimeField>(field_element: &F) -> u32 {
+pub fn to_u32<F: PrimeField>(field_element: &F) -> u32 {
     to_be_bits(field_element, 32)
         .iter()
         .fold(0u32, |acc, b| (acc << 1) + (*b as u32))
@@ -115,7 +115,7 @@ mod tests {
     use halo2_proofs::halo2curves::bn256::Fr as Fp;
     use num_bigint::BigUint;
 
-    use crate::utils::{decompose_word_be, to_be_bits, to_u32, from_be_bits};
+    use crate::utils::{decompose_word_be, from_be_bits, to_be_bits, to_u32};
 
     use super::integer_division;
 
@@ -135,7 +135,10 @@ mod tests {
 
     #[test]
     fn test_from_be_bits() {
-        assert_eq!(from_be_bits::<Fp>(&vec![false, true, true, false]), Fp::from(6));
+        assert_eq!(
+            from_be_bits::<Fp>(&vec![false, true, true, false]),
+            Fp::from(6)
+        );
         assert_eq!(
             from_be_bits::<Fp>(&vec![
                 false, false, false, true, false, false, false, true, // Byte 1

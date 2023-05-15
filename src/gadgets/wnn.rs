@@ -18,7 +18,7 @@ use crate::gadgets::{
     response_accumulator::{ResponseAccumulatorChip, ResponseAccumulatorChipConfig},
 };
 
-pub(crate) trait WnnInstructions<F: PrimeField> {
+pub trait WnnInstructions<F: PrimeField> {
     fn predict(
         &self,
         layouter: &mut impl Layouter<F>,

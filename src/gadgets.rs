@@ -1,4 +1,4 @@
-mod bloom_filter;
-mod hash;
-mod response_accumulator;
+pub mod bloom_filter;
+pub mod hash;
+pub mod response_accumulator;
 pub mod wnn;

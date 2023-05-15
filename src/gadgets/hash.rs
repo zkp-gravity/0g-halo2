@@ -10,37 +10,37 @@ use num_bigint::BigUint;
 
 use crate::utils::integer_division;
 
-pub(crate) trait HashInstructions<F: PrimeField> {
+pub trait HashInstructions<F: PrimeField> {
     fn hash(&self, layouter: &mut impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error>;
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HashFunctionConfig {
+pub struct HashFunctionConfig {
     /// Prime to use in the hash function
-    pub(crate) p: u64,
+    pub p: u64,
     /// number of bits for the hash function output
-    pub(crate) l: usize,
+    pub l: usize,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HashConfig {
+pub struct HashConfig {
     selector: Selector,
     input: Column<Advice>,
     quotient: Column<Advice>,
     remainder: Column<Advice>,
     msb: Column<Advice>,
     hash: Column<Advice>,
-    pub(crate) hash_function_config: HashFunctionConfig,
+    pub hash_function_config: HashFunctionConfig,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HashChip<F: PrimeField> {
+pub struct HashChip<F: PrimeField> {
     config: HashConfig,
     _marker: PhantomData<F>,
 }
 
 impl<F: PrimeField> HashChip<F> {
-    pub(crate) fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
         quotient: Column<Advice>,
@@ -88,7 +88,7 @@ impl<F: PrimeField> HashChip<F> {
         }
     }
 
-    pub(crate) fn construct(config: HashConfig) -> Self {
+    pub fn construct(config: HashConfig) -> Self {
         HashChip {
             config,
             _marker: PhantomData,

@@ -16,22 +16,22 @@ use self::{
     byte_selector::{ByteSelectorChip, ByteSelectorChipConfig, ByteSelectorInstructions},
 };
 
-mod and_bits;
-mod array_lookup;
-mod bit_selector;
-mod byte_selector;
+pub mod and_bits;
+pub mod array_lookup;
+pub mod bit_selector;
+pub mod byte_selector;
 pub mod single_bit_bloom_filter;
 
 #[derive(Debug, Clone)]
-pub(crate) struct BloomFilterConfig {
+pub struct BloomFilterConfig {
     /// Number of hashes per bloom filter
-    pub(crate) n_hashes: usize,
+    pub n_hashes: usize,
 
     /// Number of bits per hash, i.e., the log2 of the number of bits in the bloom filter array
-    pub(crate) bits_per_hash: usize,
+    pub bits_per_hash: usize,
 }
 
-pub(crate) trait BloomFilterInstructions<F: PrimeField> {
+pub trait BloomFilterInstructions<F: PrimeField> {
     fn bloom_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -41,14 +41,14 @@ pub(crate) trait BloomFilterInstructions<F: PrimeField> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct BloomFilterChipConfig {
+pub struct BloomFilterChipConfig {
     array_lookup_config: ArrayLookupChipConfig,
     byte_selector_config: ByteSelectorChipConfig,
     bit_selector_config: BitSelectorChipConfig,
     and_bits_config: AndBitsChipConfig,
 }
 
-pub(crate) struct BloomFilterChip<F: PrimeField> {
+pub struct BloomFilterChip<F: PrimeField> {
     config: BloomFilterChipConfig,
     bloom_filter_arrays: Array2<bool>,
     _marker: PhantomData<F>,
@@ -63,7 +63,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
         }
     }
 
-    pub(crate) fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+    pub fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         let mut array_lookup_chip = ArrayLookupChip::construct(
             self.config.array_lookup_config.clone(),
             self.bloom_filter_arrays.clone(),
