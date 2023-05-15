@@ -7,7 +7,9 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
+/// Interface of the And Bits gadget.
 pub trait AndBitsInstruction<F: PrimeField> {
+    /// Performs the AND operation on the bits.
     fn and_bits(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -22,12 +24,24 @@ pub struct AndBitsChipConfig {
     selector: Selector,
 }
 
+/// Implements an and-reduction using two advice columns.
+///
+/// The layout is as follows:
+///
+/// | bits | acc   |
+/// |------|-------|
+/// | b_1  | 1     |
+/// | b_2  | acc_1 |
+/// | ...  | acc_2 |
+/// | b_n  | ...   |
+/// |      | acc_n |
 pub struct AndBitsChip<F: PrimeField> {
     config: AndBitsChipConfig,
     _marker: PhantomData<F>,
 }
 
 impl<F: PrimeField> AndBitsChip<F> {
+    /// Constructs a new instance of the And Bits gadget.
     pub fn construct(config: AndBitsChipConfig) -> Self {
         Self {
             config,
@@ -43,6 +57,11 @@ impl<F: PrimeField> AndBitsChip<F> {
         let selector = meta.selector();
 
         meta.create_gate("validate_bit_acc", |meta| {
+            // Layout:
+            // | bits | acc      | selector |
+            // |------|----------|----------|
+            // | bit  | acc_cur  | 1        |
+            // |      | acc_next |          |
             let selector = meta.query_selector(selector);
 
             let bit = meta.query_advice(bits, Rotation::cur());
@@ -85,6 +104,8 @@ impl<F: PrimeField> AndBitsInstruction<F> for AndBitsChip<F> {
                     bit.copy_advice(|| "bit", &mut region, self.config.bits, i)?;
                 }
 
+                // Using assign_advice_from_constant() instead of assign_advice()
+                // with acc_values[0] has a side effect of adding an equality constraint.
                 let mut cell = region.assign_advice_from_constant(
                     || "acc_first",
                     self.config.acc,

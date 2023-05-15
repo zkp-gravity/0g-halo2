@@ -9,7 +9,10 @@ use halo2_proofs::{
 
 use crate::utils::{to_be_bits, to_u32};
 
+/// The interface of the Bit Selector gadget.
 pub trait BitSelectorInstructions<F: PrimeField> {
+    /// Given a byte and index, returns the bit at the given index
+    /// (assuming a big-endian representation).
     fn select_bit(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -32,6 +35,8 @@ pub struct BitSelectorChipConfig {
     lookup_selector: Selector,
 }
 
+/// Implements a bit selector using a lookup table.
+/// The layout is a single row with a (byte, index, bit) tuple.
 pub struct BitSelectorChip<F: PrimeField> {
     config: BitSelectorChipConfig,
 
@@ -46,6 +51,8 @@ impl<F: PrimeField> BitSelectorChip<F> {
         }
     }
 
+    /// Loads the lookup table.
+    /// Should be called before [`BitSelectorInstructions::select_bit``].
     pub fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         layouter.assign_table(
             || "byte,index,bit",
@@ -103,6 +110,9 @@ impl<F: PrimeField> BitSelectorChip<F> {
             let byte = meta.query_advice(byte, Rotation::cur());
             let index = meta.query_advice(index, Rotation::cur());
             let bit = meta.query_advice(bit, Rotation::cur());
+
+            // Note that we don't provide a default value. This is because if the selector
+            // is zero, the tuple (0, 0, 0) is looked up, which is already in the table.
 
             vec![
                 (lookup_selector.clone() * byte, byte_column),

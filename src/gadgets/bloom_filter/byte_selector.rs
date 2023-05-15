@@ -3,13 +3,17 @@ use std::marker::PhantomData;
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter},
-    plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector, TableColumn},
+    plonk::{
+        Advice, Column, ConstraintSystem, Constraints, Error, Selector, TableColumn, VirtualCells,
+    },
     poly::Rotation,
 };
 
 use crate::utils::{decompose_word_be, enable_range, to_u32};
 
+/// The interface of the Byte Selector gadget.
 pub trait ByteSelectorInstructions<F: PrimeField> {
+    /// Given a word and index, returns the byte at the given index.
     fn select_byte(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -35,6 +39,27 @@ pub struct ByteSelectorChipConfig {
     byte_acc_selector: Selector,
 }
 
+/// Implements a byte selector using 6 columns and `num_bytes + 1` advice rows.
+///
+/// The layout is as follows (example of 4 bytes and lookup_index = 1)):
+///
+/// | byte_decomposition | lookup_index        | byte_index   | byte_selector | selector_acc | byte_acc            |
+/// |--------------------|---------------------|--------------|---------------|--------------|---------------------|
+/// | word (copy)        | 1 (copy)            | 3 (constant) | 0             | 0 (constant) | 0 (constant)        |
+/// | word >> 8          | 1 (copy)            | 2 (constant) | 0             | 0            | 0                   |
+/// | word >> 16         | 1 (copy)            | 1 (constant) | 1             | 0            | 0                   |
+/// | word >> 24         | 1 (copy)            | 0 (constant) | 0             | 1            | byte_1              |
+/// | 0 (constant)       |                     |              |               | 1 (constant) | byte_1 (output)     |
+///
+/// It roughly works as follows:
+/// - The ith byte can be computed from the byte decomposition, by looking at consecutive rows.
+/// - A table lookup is used to enforce that the shifted-out parts are indeed bytes.
+/// - The prover must set the `byte_selector` column to a one-hot encoding of the index.
+///   This is enforced as follows:
+///   - The `byte_selector` must be a bit.
+///   - The sum of the byte selectors (computed via the `selector_acc` column) must be 1.
+///   - When the selector is 1, the `lookup_index` must be equal to the `byte_index`.
+/// - Finally, the `byte_acc` column is used to to propagate the selected byte to the last cell.
 #[derive(Debug, Clone)]
 pub struct ByteSelectorChip<F: PrimeField> {
     config: ByteSelectorChipConfig,
@@ -65,20 +90,26 @@ impl<F: PrimeField> ByteSelectorChip<F> {
         let right_byte_selector = meta.selector();
         let byte_acc_selector = meta.selector();
 
-        meta.lookup("byte_decomposition", |meta| {
-            let byte_decomposition_selector = meta.query_selector(byte_decomposition_selector);
-            let z_cur = meta.query_advice(byte_decomposition, Rotation::cur());
-
+        let reconstruct_byte = |meta: &mut VirtualCells<F>| {
             // We recover the word from the difference of the running sums:
-            //    z_i = 2^{K}⋅z_{i + 1} + a_i
-            // => a_i = z_i - 2^{K}⋅z_{i + 1}
+            //    z_i = 2^8⋅z_{i + 1} + a_i
+            // => a_i = z_i - 2^8⋅z_{i + 1}
+            let z_cur = meta.query_advice(byte_decomposition, Rotation::cur());
             let z_next = meta.query_advice(byte_decomposition, Rotation::next());
-            let running_sum_word = z_cur.clone() - z_next * F::from(1 << 8);
+            z_cur.clone() - z_next * F::from(1 << 8)
+        };
 
-            vec![(byte_decomposition_selector * running_sum_word, byte_table)]
+        meta.lookup("byte_decomposition", |meta| {
+            // Validate that the reconstructed values are indeed bytes, via a lookup
+            // into the byte table.
+            let byte_decomposition_selector = meta.query_selector(byte_decomposition_selector);
+            let byte = reconstruct_byte(meta);
+
+            vec![(byte_decomposition_selector * byte, byte_table)]
         });
 
         meta.create_gate("selector_is_bit", |meta| {
+            // Validate that the selector values are bits.
             let is_bit_selector = meta.query_selector(is_bit_selector);
             let byte_selector = meta.query_advice(byte_selector, Rotation::cur());
 
@@ -89,18 +120,21 @@ impl<F: PrimeField> ByteSelectorChip<F> {
         });
 
         meta.create_gate("selector_acc", |meta| {
+            // Validate that the next selector_acc is the current selector_acc plus the
+            // current selector.
             let selector_acc_selector = meta.query_selector(selector_acc_selector);
-            let byte_selector_prev = meta.query_advice(byte_selector, Rotation::prev());
+            let byte_selector_cur = meta.query_advice(byte_selector, Rotation::cur());
             let selector_acc_cur = meta.query_advice(selector_acc, Rotation::cur());
-            let selector_acc_prev = meta.query_advice(selector_acc, Rotation::prev());
+            let selector_acc_next = meta.query_advice(selector_acc, Rotation::next());
 
             Constraints::with_selector(
                 selector_acc_selector,
-                vec![selector_acc_cur - selector_acc_prev - byte_selector_prev],
+                vec![selector_acc_next - selector_acc_cur - byte_selector_cur],
             )
         });
 
         meta.create_gate("right_byte_selected", |meta| {
+            // Validate that lookup_index == byte_index when the selector is 1.
             let right_byte_selector = meta.query_selector(right_byte_selector);
             let lookup_index = meta.query_advice(lookup_index, Rotation::cur());
             let byte_index = meta.query_advice(byte_index, Rotation::cur());
@@ -113,20 +147,17 @@ impl<F: PrimeField> ByteSelectorChip<F> {
         });
 
         meta.create_gate("byte_acc", |meta| {
+            // Validate that byte_acc_next = byte_acc_cur + byte_selector_cur * byte_cur
             let byte_acc_selector = meta.query_selector(byte_acc_selector);
             let byte_acc_cur = meta.query_advice(byte_acc, Rotation::cur());
-            let byte_acc_prev = meta.query_advice(byte_acc, Rotation::prev());
+            let byte_acc_next = meta.query_advice(byte_acc, Rotation::next());
+            let byte_cur = reconstruct_byte(meta);
 
-            // Reconstruct byte
-            let z_prev = meta.query_advice(byte_decomposition, Rotation::prev());
-            let z_cur = meta.query_advice(byte_decomposition, Rotation::cur());
-            let byte = z_prev.clone() - z_cur * F::from(1 << 8);
-
-            let byte_selector = meta.query_advice(byte_selector, Rotation::prev());
+            let byte_selector_cur = meta.query_advice(byte_selector, Rotation::cur());
 
             Constraints::with_selector(
                 byte_acc_selector,
-                vec![byte_acc_cur - byte_acc_prev - byte_selector * byte],
+                vec![byte_acc_next - byte_acc_cur - byte_selector_cur * byte_cur],
             )
         });
 
@@ -157,22 +188,19 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
         layouter.assign_region(
             || "select_byte",
             |mut region| {
-                // Bytes in **little endian** order
-                let bytes = word.value().map(|word| {
-                    decompose_word_be(word, num_bytes, 8)
-                        .into_iter()
-                        .rev()
-                        .collect::<Vec<_>>()
-                });
-                let ith_byte = bytes
+                let bytes_be = word
+                    .value()
+                    .map(|word| decompose_word_be(word, num_bytes, 8));
+                let ith_byte = bytes_be
                     .clone()
                     .zip(index.value())
-                    .map(|(words, index)| words[num_bytes - 1 - to_u32(index) as usize]);
-                let bytes = bytes.transpose_vec(num_bytes);
+                    .map(|(words, index)| words[to_u32(index) as usize]);
+                let bytes_be = bytes_be.transpose_vec(num_bytes);
 
+                // Byte decomposition enumerates bytes in little endian order.
                 let mut byte_decomposition = vec![word.value_field().evaluate()];
                 let shift_factor = F::from(1 << 8).invert().unwrap();
-                for byte in bytes {
+                for byte in bytes_be.iter().rev() {
                     let prev = byte_decomposition[byte_decomposition.len() - 1];
                     byte_decomposition.push(
                         byte.zip(prev)
@@ -183,23 +211,35 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
                 byte_decomposition[byte_decomposition.len() - 1]
                     .assert_if_known(|last_value| *last_value == F::ZERO);
 
-                word.copy_advice(|| "word", &mut region, self.config.byte_decomposition, 0)?;
-                for i in 1..(byte_decomposition.len() - 1) {
-                    region.assign_advice(
-                        || "byte_decompositon",
-                        self.config.byte_decomposition,
-                        i,
-                        || byte_decomposition[i],
-                    )?;
+                for (i, byte_decomposition_i) in byte_decomposition.into_iter().enumerate() {
+                    if i == 0 {
+                        // Add equality constraint for the first word
+                        word.copy_advice(
+                            || "word",
+                            &mut region,
+                            self.config.byte_decomposition,
+                            0,
+                        )?;
+                    } else if i < num_bytes {
+                        region.assign_advice(
+                            || "byte_decompositon",
+                            self.config.byte_decomposition,
+                            i,
+                            || byte_decomposition_i,
+                        )?;
+                    } else {
+                        // Last word must be 0
+                        region.assign_advice_from_constant(
+                            || "byte_decomposition_0",
+                            self.config.byte_decomposition,
+                            i,
+                            F::ZERO,
+                        )?;
+                    }
                 }
-                region.assign_advice_from_constant(
-                    || "byte_decomposition_0",
-                    self.config.byte_decomposition,
-                    byte_decomposition.len() - 1,
-                    F::ZERO,
-                )?;
 
-                for i in 0..(byte_decomposition.len() - 1) {
+                // Lookup index is the same for all rows.
+                for i in 0..num_bytes {
                     index.copy_advice(
                         || "lookup_index",
                         &mut region,
@@ -235,41 +275,48 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
                     )?;
                 }
 
-                region.assign_advice_from_constant(
-                    || "selector_acc_0",
-                    self.config.selector_acc,
-                    0,
-                    F::ZERO,
-                )?;
-                for i in 1..num_bytes {
-                    let selector_acc_value = index.value().map(|index| {
-                        if (num_bytes - i) <= to_u32(index) as usize {
-                            F::ONE
-                        } else {
-                            F::ZERO
-                        }
-                    });
-                    region.assign_advice(
-                        || "selector_acc",
-                        self.config.selector_acc,
-                        i,
-                        || selector_acc_value,
-                    )?;
+                for i in 0..(num_bytes + 1) {
+                    if i == 0 {
+                        // First accumulator must be zero
+                        region.assign_advice_from_constant(
+                            || "selector_acc_0",
+                            self.config.selector_acc,
+                            0,
+                            F::ZERO,
+                        )?;
+                    } else if i < num_bytes {
+                        let selector_acc_value = index.value().map(|index| {
+                            if (num_bytes - i) <= to_u32(index) as usize {
+                                F::ONE
+                            } else {
+                                F::ZERO
+                            }
+                        });
+                        region.assign_advice(
+                            || "selector_acc",
+                            self.config.selector_acc,
+                            i,
+                            || selector_acc_value,
+                        )?;
+                    } else {
+                        // Last accumulator must be 1
+                        region.assign_advice_from_constant(
+                            || "selector_acc_last",
+                            self.config.selector_acc,
+                            i,
+                            F::ONE,
+                        )?;
+                    }
                 }
-                region.assign_advice_from_constant(
-                    || "selector_acc_1",
-                    self.config.selector_acc,
-                    byte_decomposition.len() - 1,
-                    F::ONE,
-                )?;
 
+                // First accumulator must be zero
                 let mut result = region.assign_advice_from_constant(
                     || "byte_acc_0",
                     self.config.byte_acc,
                     0,
                     F::ZERO,
                 )?;
-                for i in 1..byte_decomposition.len() {
+                for i in 1..(num_bytes + 1) {
                     let byte_acc_value = index.value().zip(ith_byte).map(|(index, ith_byte)| {
                         if (num_bytes - i) <= to_u32(index) as usize {
                             ith_byte
@@ -288,28 +335,12 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
                 enable_range(
                     &mut region,
                     self.config.byte_decomposition_selector,
-                    0..byte_decomposition.len() - 1,
+                    0..num_bytes,
                 )?;
-                enable_range(
-                    &mut region,
-                    self.config.is_bit_selector,
-                    0..byte_decomposition.len() - 1,
-                )?;
-                enable_range(
-                    &mut region,
-                    self.config.selector_acc_selector,
-                    1..byte_decomposition.len(),
-                )?;
-                enable_range(
-                    &mut region,
-                    self.config.right_byte_selector,
-                    0..byte_decomposition.len() - 1,
-                )?;
-                enable_range(
-                    &mut region,
-                    self.config.byte_acc_selector,
-                    1..byte_decomposition.len(),
-                )?;
+                enable_range(&mut region, self.config.is_bit_selector, 0..num_bytes)?;
+                enable_range(&mut region, self.config.selector_acc_selector, 0..num_bytes)?;
+                enable_range(&mut region, self.config.right_byte_selector, 0..num_bytes)?;
+                enable_range(&mut region, self.config.byte_acc_selector, 0..num_bytes)?;
 
                 Ok(result)
             },

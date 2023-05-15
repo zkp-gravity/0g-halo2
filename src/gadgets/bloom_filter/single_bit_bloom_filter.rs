@@ -1,14 +1,8 @@
+//! Contains an all-in one bloom filter gadget that uses table lookups to look up single bits.
 use std::marker::PhantomData;
 
 use crate::utils::{decompose_word_be, to_u32};
 use ff::PrimeField;
-/// Gadget that implements the bloom filter lookup:
-///
-/// Given the `bloom_input`, `bloom_index`, `class_index` inputs, it:
-/// - Hashes `bloom_input` to get the `l`-bit hash
-/// - Decomposes the hash into `n_lookup` indices of length `l / n_lookup`
-/// - Performs a table lookup for each index
-/// - Returns 1 iff. all indices led to a positive lookup
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector, TableColumn},
@@ -37,6 +31,26 @@ pub struct BloomFilterChipConfig {
     bloom_filter_config: BloomFilterConfig,
 }
 
+/// Implements a Bloom filter using 5 columns and `n_hashes + 1` advice rows
+/// by storing individual bloom filter bits in a lookup table.
+///
+/// The layout is as follows:
+///
+/// | hashes      | hash_accumulator           | bloom_index        | bloom_value | bloom_accumulator |
+/// |-------------|----------------------------|--------------------|-------------|-------------------|
+/// | h_1         | 0 (constant)               | bloom_index (copy) | 1           | 1 (constant)      |
+/// | h_2         | h_1                        | bloom_index (copy) | 0           | 1                 |
+/// | hash (copy) | h_1 << bits_per_hash + h_2 |                    |             | 0 (output)        |
+///
+/// This implementation is legacy, because a more optimized version is implemented in
+/// [`super::BloomFilterChip`], which uses less rows by using less table rows and more
+/// advice rows.
+/// Note that once [Caulk](https://eprint.iacr.org/2022/621.pdf) is implemented in Halo2,
+/// this implementation will become relevant again.
+///
+/// When that happens, it could be improved by getting rid of the
+/// `hash_accumulator` column and using an approach similar to [`super::ArrayLookupChip`].
+/// This will also remove the need for the hash equality gate.
 pub struct BloomFilterChip<F: PrimeField> {
     config: BloomFilterChipConfig,
     bloom_filter_arrays: Option<Array2<bool>>,
@@ -47,7 +61,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
     pub fn construct(config: BloomFilterChipConfig) -> Self {
         BloomFilterChip {
             config,
-            // Set to known initially, have to call load() before synthesis
+            // Set to None initially, have to call load() before synthesis
             bloom_filter_arrays: None,
             _marker: PhantomData,
         }

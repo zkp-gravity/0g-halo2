@@ -1,3 +1,15 @@
+//! A collection of gadgets that implement a bloom filter.
+//!
+//! There are two options:
+//! - [`single_bit_bloom_filter`]: This module implements a simple gadgets where
+//!   individual bits are stored in the lookup table. This can lead to very large
+//!  lookup tables and few advice rows.
+//! - [`BloomFilterChip`]: This gadget implements a more complex approach, where
+//!   the lookup table stores larger words which are decomposed into bytes and bits.
+//!   A hyperparameter trades off the number of advice rows and the number of table rows,
+//!   which is set automatically such that the two are roughly equal.
+//!
+//! Both gadgets implement the [`BloomFilterInstructions`] trait and can be used interchangibly.
 use std::marker::PhantomData;
 
 use ff::PrimeField;
@@ -7,7 +19,7 @@ use halo2_proofs::{
 };
 use ndarray::Array2;
 
-use self::{
+pub use self::{
     and_bits::{AndBitsChip, AndBitsChipConfig, AndBitsInstruction},
     array_lookup::{
         ArrayLookupChip, ArrayLookupChipConfig, ArrayLookupConfig, ArrayLookupInstructions,
@@ -22,6 +34,7 @@ pub mod bit_selector;
 pub mod byte_selector;
 pub mod single_bit_bloom_filter;
 
+/// Configuration of the bloom filter.
 #[derive(Debug, Clone)]
 pub struct BloomFilterConfig {
     /// Number of hashes per bloom filter
@@ -31,7 +44,13 @@ pub struct BloomFilterConfig {
     pub bits_per_hash: usize,
 }
 
+/// The interface of the bloom filter gadget.
 pub trait BloomFilterInstructions<F: PrimeField> {
+    /// Performs a bloom filter lookup, given a hash value.
+    /// The hash value is interpreted as a `bits_per_hash * n_hashes`-bit integer
+    /// and split into `n_hashes` words of `bits_per_hash` bits each.
+    /// For each sub hash, it performs an array lookup and ands together the corresponding
+    /// bits.
     fn bloom_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -48,6 +67,16 @@ pub struct BloomFilterChipConfig {
     and_bits_config: AndBitsChipConfig,
 }
 
+/// Implements a bloom filter lookup using a 3-way lookup strategy.
+///
+/// Each index is interpreted as a word index, a byte index and a bit index.
+/// For each lookup, the following steps are performed:
+/// 1. The [`ArrayLookupChip`] is used to decompose the index
+///    and look up the word, using a table lookup.
+/// 2. The [`ByteSelectorChip`] is used to select the byte.
+/// 3. The [`BitSelectorChip`] is used to select the bit using a table
+///    lookup.
+/// 4. The [`AndBitsChip`] is used to and together the bits.
 pub struct BloomFilterChip<F: PrimeField> {
     config: BloomFilterChipConfig,
     bloom_filter_arrays: Array2<bool>,
@@ -55,6 +84,7 @@ pub struct BloomFilterChip<F: PrimeField> {
 }
 
 impl<F: PrimeField> BloomFilterChip<F> {
+    /// Constructs a new bloom filter chip.
     pub fn construct(config: BloomFilterChipConfig, bloom_filter_arrays: Array2<bool>) -> Self {
         Self {
             config,
@@ -63,10 +93,12 @@ impl<F: PrimeField> BloomFilterChip<F> {
         }
     }
 
+    /// Loads all lookup tables.
+    /// Should be called once before [`BloomFilterInstructions::bloom_lookup`]!
     pub fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         let mut array_lookup_chip = ArrayLookupChip::construct(
             self.config.array_lookup_config.clone(),
-            self.bloom_filter_arrays.clone(),
+            &self.bloom_filter_arrays,
         );
         array_lookup_chip.load(layouter)?;
 
@@ -84,28 +116,6 @@ impl<F: PrimeField> BloomFilterChip<F> {
         advice_columns: [Column<Advice>; 6],
         bloom_filter_config: BloomFilterConfig,
     ) -> BloomFilterChipConfig {
-        // word_index_bits trades off the number of advice rows and the number of table rows.
-        // For each bloom filter, we have:
-        // - The number of advice rows is roughly n_hashes * 2^byte_index_bits for the byte lookup
-        // - The number of table rows is roughly 2^(bits_per_hash - byte_index_bits - 3)
-        // Ideally, we'll want to balance the two, but since we'll need more advice rows
-        // for other things, we should prioritize fewer advice rows.
-        let byte_index_bits = ((bloom_filter_config.bits_per_hash as f32 - 3.0) / 2.0
-            - (bloom_filter_config.n_hashes as f32).log2().floor())
-            as usize;
-        let word_bits = byte_index_bits + 3;
-        let word_index_bits = bloom_filter_config.bits_per_hash - word_bits;
-        println!(
-            "Using words of {} bits with a byte address of {} bits!",
-            word_bits, word_index_bits
-        );
-
-        let array_lookup_config = ArrayLookupConfig {
-            n_hashes: bloom_filter_config.n_hashes,
-            bits_per_hash: bloom_filter_config.bits_per_hash,
-            word_index_bits,
-        };
-
         let array_lookup_config = ArrayLookupChip::configure(
             meta,
             advice_columns[0],
@@ -113,7 +123,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
             advice_columns[2],
             advice_columns[3],
             advice_columns[4],
-            array_lookup_config,
+            bloom_filter_config.into(),
         );
         let bit_selector_config = BitSelectorChip::configure(
             meta,
@@ -152,7 +162,7 @@ impl<F: PrimeField> BloomFilterInstructions<F> for BloomFilterChip<F> {
     ) -> Result<AssignedCell<F, F>, Error> {
         let array_lookup_chip = ArrayLookupChip::construct(
             self.config.array_lookup_config.clone(),
-            self.bloom_filter_arrays.clone(),
+            &self.bloom_filter_arrays,
         );
         let byte_selector_chip =
             ByteSelectorChip::<F>::construct(self.config.byte_selector_config.clone());

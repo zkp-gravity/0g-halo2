@@ -7,6 +7,11 @@ use halo2_proofs::{
 };
 use ndarray::Array2;
 
+use super::BloomFilterConfig;
+
+/// The result of the array lookup.
+///
+/// `word` should be split into bytes. Then, the byte and bit index can be used to extract the bit.
 #[derive(Debug)]
 pub struct LookupResult<F: PrimeField> {
     pub word: AssignedCell<F, F>,
@@ -14,9 +19,10 @@ pub struct LookupResult<F: PrimeField> {
     pub bit_index: AssignedCell<F, F>,
 }
 
+/// Interface of the Array Lookup gadget.
 pub trait ArrayLookupInstructions<F: PrimeField> {
     /// Given a hash value and a bloom index, decomposes the hash, looks up the word in the bloom array
-    /// and returns the word, byte index and bit index for each hash value
+    /// and returns the word, byte index and bit index for each hash value.
     fn array_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -27,14 +33,49 @@ pub trait ArrayLookupInstructions<F: PrimeField> {
 
 #[derive(Debug, Clone)]
 pub struct ArrayLookupConfig {
-    /// Number of hashes per bloom filter
+    /// Number of hashes per bloom filter.
     pub n_hashes: usize,
 
-    /// Number of bits per hash, i.e., the log2 of the number of bits in the bloom filter array
+    /// Number of bits per hash, i.e., the log2 of the number of bits in the bloom filter array.
     pub bits_per_hash: usize,
 
-    /// Number of bits for the word index
+    /// Number of bits for the word index.
+    /// This implicitly also defines the size of the word as `bits_per_hash - word_index_bits`.
+    /// 3 bits will be used as the bit index, and `bits_per_hash - word_index_bits - 3` for the
+    /// byte index.
     pub word_index_bits: usize,
+}
+
+impl From<BloomFilterConfig> for ArrayLookupConfig {
+    /// Converts a bloom filter config into an array lookup config by computing
+    /// `word_index_bits` such that advice rows and table rows are roughly balanced.
+    fn from(bloom_filter_config: BloomFilterConfig) -> Self {
+        if bloom_filter_config.bits_per_hash < 7 {
+            panic!("This gadget is intended to be used with larger bloom filters, use the single bit bloom filter instead!");
+        }
+
+        // word_index_bits trades off the number of advice rows and the number of table rows.
+        // For each bloom filter, we have:
+        // - The number of advice rows is roughly n_hashes * 2^byte_index_bits for the byte lookup
+        // - The number of table rows is roughly 2^(bits_per_hash - byte_index_bits - 3)
+        // Ideally, we'll want to balance the two, but since we'll need more advice rows
+        // for other things, we should prioritize fewer advice rows.
+        let byte_index_bits = ((bloom_filter_config.bits_per_hash as f32 - 3.0) / 2.0
+            - (bloom_filter_config.n_hashes as f32).log2().floor())
+            as usize;
+        let word_bits = byte_index_bits + 3;
+        let word_index_bits = bloom_filter_config.bits_per_hash - word_bits;
+        println!(
+            "Using words of {} bits with a byte address of {} bits!",
+            word_bits, word_index_bits
+        );
+
+        ArrayLookupConfig {
+            n_hashes: bloom_filter_config.n_hashes,
+            bits_per_hash: bloom_filter_config.bits_per_hash,
+            word_index_bits,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -54,19 +95,45 @@ pub struct ArrayLookupChipConfig {
     array_lookup_config: ArrayLookupConfig,
 }
 
+/// Implements the array lookup using 5 columns and `n_hashes + 1` advice rows.
+///
+/// The layout is as follows:
+///
+/// | hash_decomposition    | byte_index   | bit_index   | bloom_index        | bloom_value |
+/// |-----------------------|--------------|-------------|--------------------|-------------|
+/// | hash (copy)           | byte_index_0 | bit_index_0 | bloom_index (copy) | word_0      |
+/// | hash >> bits_per_hash | byte_index_1 | bit_index_1 | bloom_index (copy) | word_1      |
+/// | 0 (constant)          |              |             |                    |             |
 pub struct ArrayLookupChip<F: PrimeField> {
     config: ArrayLookupChipConfig,
     bloom_filter_words: Vec<Vec<F>>,
 }
 
 impl<F: PrimeField> ArrayLookupChip<F> {
-    pub fn construct(config: ArrayLookupChipConfig, bloom_filter_arrays: Array2<bool>) -> Self {
-        let bloom_filter_length = 1 << config.array_lookup_config.bits_per_hash;
+    /// Constructs a new instance of the Array Lookup gadget.
+    pub fn construct(config: ArrayLookupChipConfig, bloom_filter_arrays: &Array2<bool>) -> Self {
+        let bloom_filter_words = Self::compute_bloom_filter_words(
+            bloom_filter_arrays,
+            config.array_lookup_config.bits_per_hash,
+            config.array_lookup_config.word_index_bits,
+        );
+
+        ArrayLookupChip {
+            config,
+            bloom_filter_words,
+        }
+    }
+
+    /// Packs multiple bits into a field element.
+    fn compute_bloom_filter_words(
+        bloom_filter_arrays: &Array2<bool>,
+        bits_per_hash: usize,
+        word_index_bits: usize,
+    ) -> Vec<Vec<F>> {
+        let bloom_filter_length = 1 << bits_per_hash;
         assert_eq!(bloom_filter_arrays.shape()[1], bloom_filter_length);
 
-        let word_length = 1
-            << (config.array_lookup_config.bits_per_hash
-                - config.array_lookup_config.word_index_bits);
+        let word_length = 1 << (bits_per_hash - word_index_bits);
         assert_eq!(bloom_filter_arrays.shape()[1] % word_length, 0);
 
         let bloom_filter_words = (0..bloom_filter_arrays.shape()[0])
@@ -77,13 +144,10 @@ impl<F: PrimeField> ArrayLookupChip<F> {
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
-
-        ArrayLookupChip {
-            config,
-            bloom_filter_words,
-        }
+        bloom_filter_words
     }
 
+    /// The number of bytes in each looked up word.
     pub fn bytes_per_word(&self) -> usize {
         1 << (self.config.array_lookup_config.bits_per_hash
             - self.config.array_lookup_config.word_index_bits
@@ -107,6 +171,15 @@ impl<F: PrimeField> ArrayLookupChip<F> {
         let bloom_filter_lookup_selector = meta.complex_selector();
 
         meta.lookup("bloom filter lookup", |meta| {
+            // Layout:
+            // | hash_decomposition      | byte_index | bit_index | bloom_index | bloom_value |
+            // |-------------------------|------------|-----------|-------------|-------------|
+            // | hash_decomposition_cur  | byte_index | bit_index | bloom_index | bloom_value |
+            // | hash_decomposition_next |            |           |             |             |
+            // where hash_decomposition_next = hash_decomposition_cur >> bits_per_hash.
+            // From hash_decomposition_cur, hash_composition_next, byte_index and bit_index,
+            // we can compute the word index and perform a table lookup to validate that
+            // the claimed bloom_value is correct.
             let selector = meta.query_selector(bloom_filter_lookup_selector);
 
             let hash_decomposition_cur = meta.query_advice(hash_decomposition, Rotation::cur());
@@ -114,16 +187,19 @@ impl<F: PrimeField> ArrayLookupChip<F> {
             let byte_index = meta.query_advice(byte_index, Rotation::cur());
             let bit_index = meta.query_advice(bit_index, Rotation::cur());
 
+            // Reconstruct hash of the current row
+            // (i.e., the bits_per_hash-bit part that has been shifted out)
             let shift_multiplier = F::from(1 << bloom_filter_config.bits_per_hash);
+            let current_hash = hash_decomposition_cur - hash_decomposition_next * shift_multiplier;
+
+            // Reconstruct the word index
+            // (i.e., the word_index_bits most significant bits of the hash)
             let two_pow_3 = F::from(1 << 3);
             let right_shift_multiplier = F::from(
                 1 << (bloom_filter_config.bits_per_hash - bloom_filter_config.word_index_bits),
             )
             .invert()
             .unwrap();
-
-            let current_hash = hash_decomposition_cur - hash_decomposition_next * shift_multiplier;
-
             let word_index =
                 (current_hash - byte_index * two_pow_3 - bit_index) * right_shift_multiplier;
 
@@ -165,11 +241,13 @@ impl<F: PrimeField> ArrayLookupChip<F> {
         }
     }
 
+    // Loads the bloom filters into the table.
+    /// Should be called once before [`ArrayLookupInstructions::array_lookup`]!
     pub fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         layouter.assign_table(
             || "bloom_filters",
             |mut table| {
-                let mut offset = 0usize;
+                let mut offset = 0;
 
                 for bloom_index in 0..self.bloom_filter_words.len() {
                     for (i, word) in self.bloom_filter_words[bloom_index].iter().enumerate() {
@@ -227,7 +305,7 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
                 let word_index_bits = self.config.array_lookup_config.word_index_bits;
 
                 // Compute values to put in cells
-                // The hash decomposition wors on assuming a little endian representation of the hash value,
+                // For the hash decomposition, we need a little endian representation of the hash value,
                 // so we reverse the hash values here
                 let hash_values_le = hash_value.value().map(|hash_value| {
                     decompose_word_be(hash_value, n_hashes, bits_per_hash)
@@ -255,8 +333,7 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
                                     F::from(byte_index as u64),
                                     F::from(bit_index as u64),
                                 )
-                            })
-                            .collect()
+                            }).collect()
                     });
 
                 let bloom_values = index_values
@@ -469,7 +546,7 @@ mod tests {
 
             let mut bloom_filter_chip = ArrayLookupChip::construct(
                 config.bloom_filter_chip_config,
-                self.bloom_filter_arrays.clone(),
+                &self.bloom_filter_arrays,
             );
             bloom_filter_chip.load(&mut layouter)?;
 
