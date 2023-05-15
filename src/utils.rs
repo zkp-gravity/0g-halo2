@@ -1,17 +1,33 @@
+use std::ops::Range;
+
 use ff::PrimeField;
-use halo2_proofs::circuit::Value;
+use halo2_proofs::{
+    circuit::{Region, Value},
+    plonk::{Error, Selector},
+};
 use num_bigint::BigUint;
 
 #[allow(dead_code)]
-pub(crate) fn print_value<F: PrimeField>(name: &str, value: Value<&F>) {
-    value.map(|x| println!("{name}: {}", to_u32(x)));
+pub fn print_value<F: PrimeField>(name: &str, value: Value<&F>) {
+    value.map(|x| println!("{name}: {:#01x}", to_u32(x)));
 }
 
 #[allow(dead_code)]
-pub(crate) fn print_values<F: PrimeField>(name: &str, values: &Vec<Value<F>>) {
+pub fn print_values<F: PrimeField>(name: &str, values: &Vec<Value<F>>) {
     values.iter().for_each(|value| {
-        value.map(|x| println!("{name}: {}", to_u32(&x)));
+        value.map(|x| println!("{name}: {:#01x}", to_u32(&x)));
     });
+}
+
+pub fn enable_range<F: PrimeField>(
+    region: &mut Region<F>,
+    selector: Selector,
+    range: Range<usize>,
+) -> Result<(), Error> {
+    for i in range {
+        selector.enable(region, i)?;
+    }
+    Ok(())
 }
 
 pub fn argmax(vec: &Vec<u32>) -> usize {
@@ -26,7 +42,7 @@ pub fn argmax(vec: &Vec<u32>) -> usize {
     index
 }
 
-pub(crate) fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
+pub fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
     let x_bigint = BigUint::from_bytes_le(x.to_repr().as_ref());
     let quotient = x_bigint / divisor;
 
@@ -40,7 +56,7 @@ pub(crate) fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
 
 /// Implement to_le_bits for any `PrimeField` type, not just `PrimeFieldBits`
 /// For example, the BN256 Fr type does not implement PrimeFieldBits
-fn to_le_bits<F: PrimeField>(x: &F, n_bits: usize) -> Vec<bool> {
+pub fn to_be_bits<F: PrimeField>(x: &F, n_bits: usize) -> Vec<bool> {
     // This assumes numbers are stored in little endian order
     let mut x = BigUint::from_bytes_le(x.to_repr().as_ref());
 
@@ -52,32 +68,45 @@ fn to_le_bits<F: PrimeField>(x: &F, n_bits: usize) -> Vec<bool> {
         x >>= 1;
     }
 
+    // Convert to big endian order
+    result.reverse();
+
     result
 }
 
-pub(crate) fn decompose_word<F: PrimeField>(
+pub fn from_be_bits<F: PrimeField>(bits: &[bool]) -> F {
+    let mut result = F::ZERO;
+    let two = F::from(2 as u64);
+    for b in bits.iter() {
+        result = result * two;
+        if *b {
+            result += F::ONE;
+        }
+    }
+    result
+}
+
+pub fn decompose_word_be<F: PrimeField>(
     word: &F,
     num_windows: usize,
     window_num_bits: usize,
 ) -> Vec<F> {
     // Get bits in little endian order, select `word_num_bits` least significant bits
-    let bits = to_le_bits(word, num_windows * window_num_bits);
+    let bits = to_be_bits(word, num_windows * window_num_bits);
     let two = F::from(2);
 
     bits.chunks_exact(window_num_bits)
         .map(|chunk| {
             chunk
                 .iter()
-                .rev()
                 .fold(F::ZERO, |acc, b| acc * two + F::from(*b as u64))
         })
         .collect()
 }
 
-pub(crate) fn to_u32<F: PrimeField>(field_element: &F) -> u32 {
-    to_le_bits(field_element, 32)
+pub fn to_u32<F: PrimeField>(field_element: &F) -> u32 {
+    to_be_bits(field_element, 32)
         .iter()
-        .rev()
         .fold(0u32, |acc, b| (acc << 1) + (*b as u32))
 }
 
@@ -86,21 +115,52 @@ mod tests {
     use halo2_proofs::halo2curves::bn256::Fr as Fp;
     use num_bigint::BigUint;
 
-    use crate::utils::{decompose_word, to_u32};
+    use crate::utils::{decompose_word_be, from_be_bits, to_be_bits, to_u32};
 
     use super::integer_division;
 
     #[test]
-    fn test_decompose_word() {
-        assert_eq!(decompose_word(&Fp::from(6), 1, 10), vec![Fp::from(6)]);
+    fn test_to_be_bits() {
+        assert_eq!(to_be_bits(&Fp::from(6), 4), vec![false, true, true, false]);
         assert_eq!(
-            decompose_word(&Fp::from(0xabcdef), 2, 12),
-            vec![Fp::from(0xdef), Fp::from(0xabc)]
+            to_be_bits(&Fp::from(0x11223344u64), 32),
+            vec![
+                false, false, false, true, false, false, false, true, // Byte 1
+                false, false, true, false, false, false, true, false, // Byte 2
+                false, false, true, true, false, false, true, true, // Byte 3
+                false, true, false, false, false, true, false, false // Byte 4
+            ]
         );
     }
 
     #[test]
-    fn test_to_u64() {
+    fn test_from_be_bits() {
+        assert_eq!(
+            from_be_bits::<Fp>(&vec![false, true, true, false]),
+            Fp::from(6)
+        );
+        assert_eq!(
+            from_be_bits::<Fp>(&vec![
+                false, false, false, true, false, false, false, true, // Byte 1
+                false, false, true, false, false, false, true, false, // Byte 2
+                false, false, true, true, false, false, true, true, // Byte 3
+                false, true, false, false, false, true, false, false // Byte 4
+            ]),
+            Fp::from(0x11223344u64)
+        );
+    }
+
+    #[test]
+    fn test_decompose_word_be() {
+        assert_eq!(decompose_word_be(&Fp::from(6), 1, 10), vec![Fp::from(6)]);
+        assert_eq!(
+            decompose_word_be(&Fp::from(0xabcdef), 2, 12),
+            vec![Fp::from(0xabc), Fp::from(0xdef)]
+        );
+    }
+
+    #[test]
+    fn test_to_u32() {
         assert_eq!(to_u32(&Fp::from(6)), 6u32);
         assert_eq!(to_u32(&Fp::from(0x11223344u64)), 0x11223344u32);
     }
