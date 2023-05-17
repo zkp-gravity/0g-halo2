@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use halo2_proofs::{
     dev::MockProver,
-    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof},
+    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, ProvingKey, VerifyingKey},
     poly::{
         commitment::ParamsProver,
         kzg::{
@@ -186,7 +186,29 @@ impl Wnn {
         circuit.plot("real_wnn_layout.png", k);
     }
 
-    pub fn proof_and_verify(&self, image: &Array2<u8>, k: u32) {
+    /// Generate a proving key and verification key.
+    ///
+    /// The verification key can be accessed via `pk.get_vk()`.
+    pub fn generate_proving_key(&self, kzg_params: &ParamsKZG<Bn256>) -> ProvingKey<G1Affine> {
+        // They keys should not depend on the input, so we're generating a dummy input here
+        let dummy_bits = (0..self.input_permutation.len()).map(|_| false).collect();
+        let dummy_inputs = self.compute_hash_inputs(dummy_bits);
+
+        let circuit = self.get_circuit(dummy_inputs);
+
+        let vk = keygen_vk(kzg_params, &circuit).expect("keygen_vk should not fail");
+        let pk = keygen_pk(kzg_params, vk, &circuit).expect("keygen_pk should not fail");
+
+        pk
+    }
+
+    /// Generate a proof for the given image.
+    pub fn proof(
+        &self,
+        pk: &ProvingKey<G1Affine>,
+        kzg_params: &ParamsKZG<Bn256>,
+        image: &Array2<u8>,
+    ) -> (Vec<u8>, Vec<Fp>) {
         let input_bits = self.encode_image(image);
         let hash_inputs = self.compute_hash_inputs(input_bits.clone());
         let outputs: Vec<Fp> = self
@@ -197,23 +219,10 @@ impl Wnn {
 
         let circuit = self.get_circuit(hash_inputs);
 
-        println!("Key gen...");
-        let start = Instant::now();
-
-        let params: ParamsKZG<Bn256> = ParamsKZG::new(k);
-        let vk = keygen_vk(&params, &circuit).expect("keygen_vk should not fail");
-        let pk = keygen_pk(&params, vk, &circuit).expect("keygen_pk should not fail");
-
-        let duration = start.elapsed();
-        println!("Took: {:?}", duration);
-
-        println!("Proving...");
-        let start = Instant::now();
-
         let mut transcript: Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>> =
             Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof::<KZGCommitmentScheme<Bn256>, ProverGWC<Bn256>, _, _, _, _>(
-            &params,
+            &kzg_params,
             &pk,
             &[circuit],
             &[&[outputs.as_ref()]],
@@ -222,6 +231,43 @@ impl Wnn {
         )
         .unwrap();
         let proof = transcript.finalize();
+        (proof, outputs)
+    }
+
+    /// Verify the given proof.
+    pub fn verify_proof(
+        &self,
+        proof: &Vec<u8>,
+        kzg_params: &ParamsKZG<Bn256>,
+        vk: &VerifyingKey<G1Affine>,
+        outputs: &Vec<Fp>,
+    ) {
+        let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        let strategy = SingleStrategy::new(&kzg_params);
+        verify_proof::<_, VerifierGWC<Bn256>, _, _, _>(
+            &kzg_params,
+            vk,
+            strategy.clone(),
+            &[&[outputs.as_ref()]],
+            &mut transcript.clone(),
+        )
+        .unwrap();
+    }
+
+    pub fn proof_and_verify(&self, image: &Array2<u8>, k: u32) {
+        println!("Key gen...");
+        let start = Instant::now();
+
+        let kzg_params = ParamsKZG::new(k);
+        let pk = self.generate_proving_key(&kzg_params);
+
+        let duration = start.elapsed();
+        println!("Took: {:?}", duration);
+
+        println!("Proving...");
+        let start = Instant::now();
+
+        let (proof, outputs) = self.proof(&pk, &kzg_params, image);
 
         let duration = start.elapsed();
         println!("Took: {:?}", duration);
@@ -229,16 +275,7 @@ impl Wnn {
         println!("Verifying...");
         let start = Instant::now();
 
-        let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        let strategy = SingleStrategy::new(&params);
-        verify_proof::<_, VerifierGWC<Bn256>, _, _, _>(
-            &params,
-            pk.get_vk(),
-            strategy.clone(),
-            &[&[outputs.as_ref()]],
-            &mut transcript.clone(),
-        )
-        .unwrap();
+        self.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
 
         let duration = start.elapsed();
         println!("Took: {:?}", duration);
