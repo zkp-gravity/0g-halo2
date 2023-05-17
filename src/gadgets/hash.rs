@@ -10,22 +10,22 @@ use crate::utils::integer_division;
 
 use super::range_check::{range_check, RangeCheckConfig};
 
-pub(crate) trait HashInstructions<F: PrimeFieldBits> {
+pub trait HashInstructions<F: PrimeFieldBits> {
     fn hash(&self, layouter: impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error>;
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HashFunctionConfig {
+pub struct HashFunctionConfig {
     /// Prime to use in the hash function
-    pub(crate) p: u64,
+    pub p: u64,
     /// number of bits for the hash function output
-    pub(crate) l: usize,
+    pub l: usize,
     /// Number of input bits
-    pub(crate) n_bits: usize,
+    pub n_bits: usize,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HashConfig<F: PrimeFieldBits> {
+pub struct HashConfig<F: PrimeFieldBits> {
     selector: Selector,
     input: Column<Advice>,
     quotient: Column<Advice>,
@@ -33,16 +33,16 @@ pub(crate) struct HashConfig<F: PrimeFieldBits> {
     msb: Column<Advice>,
     hash: Column<Advice>,
     range_check_config: RangeCheckConfig<F>,
-    pub(crate) hash_function_config: HashFunctionConfig,
+    pub hash_function_config: HashFunctionConfig,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct HashChip<F: PrimeFieldBits> {
+pub struct HashChip<F: PrimeFieldBits> {
     config: HashConfig<F>,
 }
 
 impl<F: PrimeFieldBits> HashChip<F> {
-    pub(crate) fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
         quotient: Column<Advice>,
@@ -92,7 +92,7 @@ impl<F: PrimeFieldBits> HashChip<F> {
         }
     }
 
-    pub(crate) fn construct(config: HashConfig<F>) -> Self {
+    pub fn construct(config: HashConfig<F>) -> Self {
         if (config.hash_function_config.n_bits * 3) as u32 > F::CAPACITY {
             panic!("Field too small to store x^3!");
         }
@@ -210,6 +210,7 @@ mod tests {
     impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
         type Config = Config<F>;
         type FloorPlanner = SimpleFloorPlanner;
+        type Params = ();
 
         fn without_witnesses(&self) -> Self {
             Self::default()

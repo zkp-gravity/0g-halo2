@@ -9,10 +9,13 @@ path = "src/lib.rs"
 
 [dependencies]
 plotters = { version = "0.3.0" }
-halo2_proofs = { git = "https://github.com/georgwiese/halo2.git", branch = "update-halo2curves", package = "halo2_proofs", features = ["dev-graph"] }
+halo2_proofs = { git = "https://github.com/georgwiese/halo2.git", branch = "update-halo2curves", package = "halo2_proofs", features = ["dev-graph", "circuit-params"] }
 halo2_gadgets = { git = "https://github.com/georgwiese/halo2.git", branch = "update-halo2curves", package = "halo2_gadgets" }
 num-bigint = "0.4.3"
 hdf5 = "0.8.1"
 ndarray = "0.15.6"
 ff = "0.13.0"
 rand_core = "0.6.4"
+image = "0.24.6"
+clap = { version = "4.2.7", features = ["derive"] }
+indicatif = "0.17.3"

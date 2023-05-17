@@ -15,21 +15,15 @@ use halo2_proofs::{
         Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
     },
 };
-use ndarray::{Array1, Array3};
+use ndarray::{Array1, Array2, Array3};
 
 use halo2_proofs::halo2curves::bn256::{Bn256, Fr as Fp, G1Affine};
 use num_bigint::BigUint;
 use rand_core::OsRng;
 
-use crate::gadgets::wnn::WnnCircuit;
+use crate::gadgets::wnn::{WnnCircuit, WnnCircuitParams};
 
-pub struct Wnn<
-    const P: u64,
-    const L: usize,
-    const N_HASHES: usize,
-    const BITS_PER_HASH: usize,
-    const BITS_PER_FILTER: usize,
-> {
+pub struct Wnn {
     num_classes: usize,
     num_filter_entries: usize,
     num_filter_hashes: usize,
@@ -38,17 +32,13 @@ pub struct Wnn<
 
     /// Bloom filter array, shape (num_classes, num_inputs * bits_per_input / num_filter_inputs, num_filter_entries)
     bloom_filters: Array3<bool>,
-    input_order: Array1<u64>,
+    /// Permutation of input bits, shape (num_inputs * bits_per_input)
+    input_permutation: Array1<u64>,
+    /// Thresholds for pixels, shape (width, height, bits_per_input)
+    binarization_thresholds: Array3<f32>,
 }
 
-impl<
-        const P: u64,
-        const L: usize,
-        const N_HASHES: usize,
-        const BITS_PER_HASH: usize,
-        const BITS_PER_FILTER: usize,
-    > Wnn<P, L, N_HASHES, BITS_PER_HASH, BITS_PER_FILTER>
-{
+impl Wnn {
     pub fn new(
         num_classes: usize,
         num_filter_entries: usize,
@@ -58,6 +48,7 @@ impl<
 
         bloom_filters: Array3<bool>,
         input_order: Array1<u64>,
+        binarization_thresholds: Array3<f32>,
     ) -> Self {
         Self {
             num_classes,
@@ -66,8 +57,30 @@ impl<
             num_filter_inputs,
             p,
             bloom_filters,
-            input_order,
+            input_permutation: input_order,
+            binarization_thresholds,
         }
+    }
+
+    pub fn num_input_bits(&self) -> usize {
+        self.input_permutation.len()
+    }
+
+    pub fn encode_image(&self, image: &Array2<u8>) -> Vec<bool> {
+        let (width, height) = (image.shape()[0], image.shape()[1]);
+
+        let mut image_bits = vec![];
+
+        for b in 0..self.binarization_thresholds.shape()[2] {
+            for i in 0..width {
+                for j in 0..height {
+                    image_bits
+                        .push(image[(i, j)] as f32 >= self.binarization_thresholds[(i, j, b)]);
+                }
+            }
+        }
+
+        image_bits
     }
 
     fn mish_mash_hash(&self, x: u64) -> BigUint {
@@ -77,24 +90,32 @@ impl<
     }
 
     fn compute_hash_inputs(&self, input_bits: Vec<bool>) -> Vec<u64> {
-        assert_eq!(input_bits.len(), self.input_order.shape()[0]);
+        assert_eq!(input_bits.len(), self.input_permutation.shape()[0]);
 
         // Permute inputs
         let inputs_permuted: Vec<bool> = self
-            .input_order
+            .input_permutation
             .iter()
             .map(|i| input_bits[*i as usize])
             .collect();
 
         // Pack inputs into integers of `num_filter_inputs` bits
+        // (LITTLE endian order)
         inputs_permuted
             .chunks_exact(self.num_filter_inputs)
-            .map(|chunk| chunk.iter().fold(0, |acc, b| (acc << 1) + (*b as u64)))
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .rev()
+                    .fold(0, |acc, b| (acc << 1) + (*b as u64))
+            })
             .collect()
     }
 
-    pub fn predict(&self, input_bits: Vec<bool>) -> Vec<u32> {
+    pub fn predict(&self, image: &Array2<u8>) -> Vec<u32> {
+        let input_bits = self.encode_image(image);
         let hash_inputs = self.compute_hash_inputs(input_bits);
+        // This asserts that the number of filter inputs does not exceed the number of bits in a u64
         assert_eq!(hash_inputs.len(), self.bloom_filters.shape()[1]);
 
         // Hash
@@ -137,20 +158,22 @@ impl<
             .collect::<Vec<_>>()
     }
 
-    fn get_circuit(
-        &self,
-        hash_inputs: Vec<u64>,
-    ) -> WnnCircuit<Fp, P, L, N_HASHES, BITS_PER_HASH, BITS_PER_FILTER> {
-        assert_eq!(self.p, P);
-        assert_eq!(self.num_filter_entries, 1 << BITS_PER_FILTER);
-        assert_eq!(self.num_filter_hashes, N_HASHES);
-        WnnCircuit::new(hash_inputs, self.bloom_filters.clone())
+    fn get_circuit(&self, hash_inputs: Vec<u64>) -> WnnCircuit<Fp> {
+        let params = WnnCircuitParams {
+            p: self.p,
+            l: self.num_filter_hashes * (self.num_filter_entries as f32).log2() as usize,
+            n_hashes: self.num_filter_hashes,
+            bits_per_hash: (self.num_filter_entries as f32).log2() as usize,
+            bits_per_filter: self.num_filter_inputs,
+        };
+        WnnCircuit::new(hash_inputs, self.bloom_filters.clone(), params)
     }
 
-    pub fn mock_proof(&self, input_bits: Vec<bool>, k: u32) {
+    pub fn mock_proof(&self, image: &Array2<u8>, k: u32) {
+        let input_bits = self.encode_image(image);
         let hash_inputs = self.compute_hash_inputs(input_bits.clone());
         let outputs: Vec<Fp> = self
-            .predict(input_bits)
+            .predict(image)
             .iter()
             .map(|o| Fp::from(*o as u64))
             .collect();
@@ -165,10 +188,11 @@ impl<
         circuit.plot("real_wnn_layout.png", 11);
     }
 
-    pub fn proof_and_verify(&self, input_bits: Vec<bool>, k: u32) {
+    pub fn proof_and_verify(&self, image: &Array2<u8>, k: u32) {
+        let input_bits = self.encode_image(image);
         let hash_inputs = self.compute_hash_inputs(input_bits.clone());
         let outputs: Vec<Fp> = self
-            .predict(input_bits)
+            .predict(image)
             .iter()
             .map(|o| Fp::from(*o as u64))
             .collect();
