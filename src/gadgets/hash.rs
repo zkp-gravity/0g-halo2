@@ -126,33 +126,25 @@ impl<F: PrimeFieldBits> HashChip<F> {
                     0,
                     || Value::known(input),
                 )?;
-                let input = input_cell.value_field();
+                let input = input_cell.value_field().evaluate();
                 let input_cubed = input * input * input;
                 let quotient = input_cubed.and_then(|input_cubed| {
-                    Value::known(integer_division(input_cubed.evaluate(), BigUint::from(p)))
+                    Value::known(integer_division(input_cubed, BigUint::from(p)))
                 });
                 let remainder = input_cubed - quotient * Value::known(F::from(p));
 
                 let msb = remainder.and_then(|remainder| {
-                    Value::known(integer_division(
-                        remainder.evaluate(),
-                        BigUint::from(1u8) << l,
-                    ))
+                    Value::known(integer_division(remainder, BigUint::from(1u8) << l))
                 });
                 let hash = remainder - msb * Value::known(F::from(1 << l));
 
-                let quotient =
-                    region.assign_advice(|| "quotient", self.config.quotient, 0, || quotient)?;
-                let remainder = region.assign_advice(
-                    || "remainder",
-                    self.config.remainder,
-                    0,
-                    || remainder.evaluate(),
-                )?;
-                let msb = region.assign_advice(|| "msb", self.config.msb, 0, || msb)?;
-                let output =
-                    region.assign_advice(|| "hash", self.config.hash, 0, || hash.evaluate())?;
-                Ok((input_cell, quotient, remainder, msb, output))
+                Ok((
+                    input_cell,
+                    region.assign_advice(|| "quotient", self.config.quotient, 0, || quotient)?,
+                    region.assign_advice(|| "remainder", self.config.remainder, 0, || remainder)?,
+                    region.assign_advice(|| "msb", self.config.msb, 0, || msb)?,
+                    region.assign_advice(|| "hash", self.config.hash, 0, || hash)?,
+                ))
             },
         )
     }
