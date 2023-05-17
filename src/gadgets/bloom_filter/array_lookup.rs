@@ -65,10 +65,6 @@ impl From<BloomFilterConfig> for ArrayLookupConfig {
             as usize;
         let word_bits = byte_index_bits + 3;
         let word_index_bits = bloom_filter_config.bits_per_hash - word_bits;
-        println!(
-            "Using words of {} bits with a byte address of {} bits!",
-            word_bits, word_index_bits
-        );
 
         ArrayLookupConfig {
             n_hashes: bloom_filter_config.n_hashes,
@@ -333,7 +329,8 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
                                     F::from(byte_index as u64),
                                     F::from(bit_index as u64),
                                 )
-                            }).collect()
+                            })
+                            .collect()
                     });
 
                 let bloom_values = index_values
