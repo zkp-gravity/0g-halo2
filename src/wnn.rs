@@ -184,8 +184,7 @@ impl Wnn {
         prover.assert_satisfied();
 
         println!("Valid!");
-        // Plot with smaller k. This won't fit the bloom filter table but everything else will be readable
-        circuit.plot("real_wnn_layout.png", 11);
+        circuit.plot("real_wnn_layout.png", k);
     }
 
     pub fn proof_and_verify(&self, image: &Array2<u8>, k: u32) {
