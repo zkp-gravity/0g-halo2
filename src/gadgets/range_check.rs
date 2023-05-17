@@ -41,14 +41,13 @@ pub fn range_check<F: PrimeFieldBits>(
     Ok(())
 }
 
-pub fn load_range_check_lookup_table<F: PrimeFieldBits>(
+pub fn load_bytes_column<F: PrimeFieldBits>(
     layouter: &mut impl Layouter<F>,
     table_column: TableColumn,
 ) -> Result<(), Error> {
     layouter.assign_table(
         || "table_idx",
         |mut table| {
-            // We generate the row values lazily (we only need them during keygen).
             for index in 0..(1 << K) {
                 table.assign_cell(
                     || "table_idx",

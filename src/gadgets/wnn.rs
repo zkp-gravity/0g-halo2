@@ -19,7 +19,7 @@ use crate::gadgets::{
     response_accumulator::{ResponseAccumulatorChip, ResponseAccumulatorChipConfig},
 };
 
-use super::range_check::load_range_check_lookup_table;
+use super::range_check::load_bytes_column;
 
 pub trait WnnInstructions<F: PrimeFieldBits> {
     fn predict(
@@ -269,7 +269,7 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
         config: Self::Config,
         mut layouter: impl halo2_proofs::circuit::Layouter<F>,
     ) -> Result<(), halo2_proofs::plonk::Error> {
-        load_range_check_lookup_table(&mut layouter, config.range_check_table)?;
+        load_bytes_column(&mut layouter, config.range_check_table)?;
         let wnn_chip = WnnChip::construct(config.wnn_chip_config);
 
         let result = wnn_chip.predict(

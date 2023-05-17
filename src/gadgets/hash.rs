@@ -20,7 +20,7 @@ pub struct HashFunctionConfig {
     pub p: u64,
     /// number of bits for the hash function output
     pub l: usize,
-    /// Number of input bits
+    /// Number of input bits (for the range checks)
     pub n_bits: usize,
 }
 
@@ -98,56 +98,73 @@ impl<F: PrimeFieldBits> HashChip<F> {
         }
         HashChip { config }
     }
+
+    fn compute_hash(
+        &self,
+        mut layouter: impl Layouter<F>,
+        input: F,
+    ) -> Result<
+        (
+            AssignedCell<F, F>,
+            AssignedCell<F, F>,
+            AssignedCell<F, F>,
+            AssignedCell<F, F>,
+            AssignedCell<F, F>,
+        ),
+        Error,
+    > {
+        let p = self.config.hash_function_config.p;
+        let l = self.config.hash_function_config.l;
+        layouter.assign_region(
+            || "hash",
+            |mut region| {
+                self.config.selector.enable(&mut region, 0)?;
+
+                let input_cell = region.assign_advice(
+                    || "input",
+                    self.config.input,
+                    0,
+                    || Value::known(input),
+                )?;
+                let input = input_cell.value_field();
+                let input_cubed = input * input * input;
+                let quotient = input_cubed.and_then(|input_cubed| {
+                    Value::known(integer_division(input_cubed.evaluate(), BigUint::from(p)))
+                });
+                let remainder = input_cubed - quotient * Value::known(F::from(p));
+
+                let msb = remainder.and_then(|remainder| {
+                    Value::known(integer_division(
+                        remainder.evaluate(),
+                        BigUint::from(1u8) << l,
+                    ))
+                });
+                let hash = remainder - msb * Value::known(F::from(1 << l));
+
+                let quotient =
+                    region.assign_advice(|| "quotient", self.config.quotient, 0, || quotient)?;
+                let remainder = region.assign_advice(
+                    || "remainder",
+                    self.config.remainder,
+                    0,
+                    || remainder.evaluate(),
+                )?;
+                let msb = region.assign_advice(|| "msb", self.config.msb, 0, || msb)?;
+                let output =
+                    region.assign_advice(|| "hash", self.config.hash, 0, || hash.evaluate())?;
+                Ok((input_cell, quotient, remainder, msb, output))
+            },
+        )
+    }
 }
 
 impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
     fn hash(&self, mut layouter: impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error> {
-        let HashFunctionConfig { p, l, n_bits } = self.config.hash_function_config;
         let (input, quotient, _remainder, msb, output) =
-            layouter.namespace(|| "hash").assign_region(
-                || "hash",
-                |mut region| {
-                    self.config.selector.enable(&mut region, 0)?;
+            self.compute_hash(layouter.namespace(|| "hash"), input)?;
 
-                    let input_cell = region.assign_advice(
-                        || "input",
-                        self.config.input,
-                        0,
-                        || Value::known(input),
-                    )?;
-                    let input = input_cell.value_field();
-                    let input_cubed = input * input * input;
-                    let quotient = input_cubed.and_then(|input_cubed| {
-                        Value::known(integer_division(input_cubed.evaluate(), BigUint::from(p)))
-                    });
-                    let remainder = input_cubed - quotient * Value::known(F::from(p));
-
-                    let msb = remainder.and_then(|remainder| {
-                        Value::known(integer_division(
-                            remainder.evaluate(),
-                            BigUint::from(1u8) << l,
-                        ))
-                    });
-                    let hash = remainder - msb * Value::known(F::from(1 << l));
-
-                    let quotient = region.assign_advice(
-                        || "quotient",
-                        self.config.quotient,
-                        0,
-                        || quotient,
-                    )?;
-                    let remainder = region.assign_advice(
-                        || "remainder",
-                        self.config.remainder,
-                        0,
-                        || remainder,
-                    )?;
-                    let msb = region.assign_advice(|| "msb", self.config.msb, 0, || msb)?;
-                    let output =
-                        region.assign_advice(|| "hash", self.config.hash, 0, || hash.evaluate())?;
-                    Ok((input_cell, quotient, remainder, msb, output))
-                },
-            )?;
+        let l = self.config.hash_function_config.l;
+        let n_bits = self.config.hash_function_config.n_bits;
 
         // Check that all cells have the right number of bits, with two exceptions:
         // - output should be l bits, but it's later decomposed and used in a table lookup, which enforces the range
@@ -190,7 +207,7 @@ mod tests {
         plonk::{Circuit, Column, Instance, TableColumn},
     };
 
-    use crate::gadgets::range_check::load_range_check_lookup_table;
+    use crate::gadgets::range_check::load_bytes_column;
 
     use super::{HashChip, HashConfig, HashFunctionConfig, HashInstructions};
 
@@ -266,7 +283,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
         ) -> Result<(), halo2_proofs::plonk::Error> {
-            load_range_check_lookup_table(&mut layouter, config.table_column)?;
+            load_bytes_column(&mut layouter, config.table_column)?;
             let hash_chip = HashChip::construct(config.hash_config);
             let hash_value = hash_chip.hash(layouter.namespace(|| "hash"), F::from(self.input))?;
 
