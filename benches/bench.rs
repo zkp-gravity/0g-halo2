@@ -1,45 +1,49 @@
 use std::path::PathBuf;
 
 use criterion::{criterion_group, criterion_main, Bencher, Criterion};
+use halo2_proofs::{
+    halo2curves::bn256::Bn256,
+    poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
+};
 use ndarray::Array2;
 use zero_g::{
     io::{image::load_image, model::load_wnn},
     wnn::Wnn,
 };
 
-fn setup() -> (Wnn, Array2<u8>, u32) {
+fn setup() -> (Wnn, Array2<u8>, ParamsKZG<Bn256>) {
     let model_path = PathBuf::from("models/model_28input_256entry_1hash_1bpi.pickle.hdf5");
     let img_path = PathBuf::from("benches/example_image_7.png");
 
     let wnn = load_wnn(&model_path).unwrap();
     let img = load_image(&img_path).unwrap();
 
-    let k = 12;
+    let kzg_params = ParamsKZG::new(12);
 
-    (wnn, img, k)
+    (wnn, img, kzg_params)
 }
 
 fn bench_key_generation(b: &mut Bencher) {
-    let (wnn, _img, k) = setup();
+    let (wnn, _img, kzg_params) = setup();
 
-    b.iter(|| wnn.generate_proving_key(k));
+    b.iter(|| wnn.generate_proving_key(&kzg_params));
 }
 
 fn bench_proof_generation(b: &mut Bencher) {
-    let (wnn, img, k) = setup();
+    let (wnn, img, kzg_params) = setup();
 
-    let (pk, kzg_params) = wnn.generate_proving_key(k);
+    let pk = wnn.generate_proving_key(&kzg_params);
 
     b.iter(|| wnn.proof(&pk, &kzg_params, &img));
 }
 
 fn bench_verification(b: &mut Bencher) {
-    let (wnn, img, k) = setup();
+    let (wnn, img, kzg_params) = setup();
 
-    let (pk, kzg_params) = wnn.generate_proving_key(k);
+    let pk = wnn.generate_proving_key(&kzg_params);
     let (proof, outputs) = wnn.proof(&pk, &kzg_params, &img);
 
-    b.iter(|| wnn.verify_proof(&proof, &kzg_params, &pk, &outputs));
+    b.iter(|| wnn.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs));
 }
 
 fn criterion_benchmark(c: &mut Criterion) {

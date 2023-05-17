@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use halo2_proofs::{
     dev::MockProver,
-    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, ProvingKey},
+    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, ProvingKey, VerifyingKey},
     poly::{
         commitment::ParamsProver,
         kzg::{
@@ -186,20 +186,23 @@ impl Wnn {
         circuit.plot("real_wnn_layout.png", k);
     }
 
-    pub fn generate_proving_key(&self, k: u32) -> (ProvingKey<G1Affine>, ParamsKZG<Bn256>) {
+    /// Generate a proving key and verification key.
+    ///
+    /// The verification key can be accessed via `pk.get_vk()`.
+    pub fn generate_proving_key(&self, kzg_params: &ParamsKZG<Bn256>) -> ProvingKey<G1Affine> {
         // They keys should not depend on the input, so we're generating a dummy input here
         let dummy_bits = (0..self.input_permutation.len()).map(|_| false).collect();
         let dummy_inputs = self.compute_hash_inputs(dummy_bits);
 
         let circuit = self.get_circuit(dummy_inputs);
 
-        let kzg_params: ParamsKZG<Bn256> = ParamsKZG::new(k);
-        let vk = keygen_vk(&kzg_params, &circuit).expect("keygen_vk should not fail");
-        let pk = keygen_pk(&kzg_params, vk, &circuit).expect("keygen_pk should not fail");
+        let vk = keygen_vk(kzg_params, &circuit).expect("keygen_vk should not fail");
+        let pk = keygen_pk(kzg_params, vk, &circuit).expect("keygen_pk should not fail");
 
-        (pk, kzg_params)
+        pk
     }
 
+    /// Generate a proof for the given image.
     pub fn proof(
         &self,
         pk: &ProvingKey<G1Affine>,
@@ -231,18 +234,19 @@ impl Wnn {
         (proof, outputs)
     }
 
+    /// Verify the given proof.
     pub fn verify_proof(
         &self,
         proof: &Vec<u8>,
         kzg_params: &ParamsKZG<Bn256>,
-        pk: &ProvingKey<G1Affine>,
+        vk: &VerifyingKey<G1Affine>,
         outputs: &Vec<Fp>,
     ) {
         let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         let strategy = SingleStrategy::new(&kzg_params);
         verify_proof::<_, VerifierGWC<Bn256>, _, _, _>(
             &kzg_params,
-            pk.get_vk(),
+            vk,
             strategy.clone(),
             &[&[outputs.as_ref()]],
             &mut transcript.clone(),
@@ -254,7 +258,8 @@ impl Wnn {
         println!("Key gen...");
         let start = Instant::now();
 
-        let (pk, kzg_params) = self.generate_proving_key(k);
+        let kzg_params = ParamsKZG::new(k);
+        let pk = self.generate_proving_key(&kzg_params);
 
         let duration = start.elapsed();
         println!("Took: {:?}", duration);
@@ -270,7 +275,7 @@ impl Wnn {
         println!("Verifying...");
         let start = Instant::now();
 
-        self.verify_proof(&proof, &kzg_params, &pk, &outputs);
+        self.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
 
         let duration = start.elapsed();
         println!("Took: {:?}", duration);

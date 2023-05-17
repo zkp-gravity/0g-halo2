@@ -11,3 +11,7 @@ There are serveral steps involved to generate proofs:
 - `cargo run --release -- predict models/model_28input_256entry_1hash_1bpi.pickle.hdf5 data/MNIST/png/0000_7.png` classifies a single image.
 - `cargo run --release -- compute-accuracy models/model_28input_256entry_1hash_1bpi.pickle.hdf5` computes the accuracy on the MNIST test set. This should yield the same number as the `evaluate.py` script in the `BTHOWeN-zero-g` repository.
 - `cargo run --release -- proof models/model_28input_256entry_1hash_1bpi.pickle.hdf5 data/MNIST/png/0000_7.png 12` classifies a single image, generates the keys & proof, and verifies the proof.
+
+## Benchmarks
+
+Run `cargo bench`.
