@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ff::PrimeField;
+use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter},
     plonk::{
@@ -12,7 +12,7 @@ use halo2_proofs::{
 use crate::utils::{decompose_word_be, enable_range, to_u32};
 
 /// The interface of the Byte Selector gadget.
-pub trait ByteSelectorInstructions<F: PrimeField> {
+pub trait ByteSelectorInstructions<F: PrimeFieldBits> {
     /// Given a word and index, returns the byte at the given index.
     fn select_byte(
         &self,
@@ -60,13 +60,15 @@ pub struct ByteSelectorChipConfig {
 ///   - The sum of the byte selectors (computed via the `selector_acc` column) must be 1.
 ///   - When the selector is 1, the `lookup_index` must be equal to the `byte_index`.
 /// - Finally, the `byte_acc` column is used to to propagate the selected byte to the last cell.
+/// 
+/// Note that this implicitly range-checks `lookup_index` to be in `[0, num_bytes)`.
 #[derive(Debug, Clone)]
-pub struct ByteSelectorChip<F: PrimeField> {
+pub struct ByteSelectorChip<F: PrimeFieldBits> {
     config: ByteSelectorChipConfig,
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> ByteSelectorChip<F> {
+impl<F: PrimeFieldBits> ByteSelectorChip<F> {
     pub fn construct(config: ByteSelectorChipConfig) -> Self {
         Self {
             config,
@@ -177,7 +179,7 @@ impl<F: PrimeField> ByteSelectorChip<F> {
     }
 }
 
-impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
+impl<F: PrimeFieldBits> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
     fn select_byte(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -352,7 +354,7 @@ impl<F: PrimeField> ByteSelectorInstructions<F> for ByteSelectorChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use ff::PrimeField;
+    use ff::PrimeFieldBits;
     use halo2_proofs::{
         circuit::{SimpleFloorPlanner, Value},
         dev::MockProver,
@@ -363,7 +365,7 @@ mod tests {
     use super::{ByteSelectorChip, ByteSelectorChipConfig, ByteSelectorInstructions};
 
     #[derive(Default)]
-    struct MyCircuit<F: PrimeField> {
+    struct MyCircuit<F: PrimeFieldBits> {
         input: u64,
         index: u64,
         num_bytes: usize,
@@ -377,7 +379,7 @@ mod tests {
         table_column: TableColumn,
     }
 
-    impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
+    impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
         type Params = ();

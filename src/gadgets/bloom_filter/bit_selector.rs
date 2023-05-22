@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ff::PrimeField;
+use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Selector, TableColumn},
@@ -10,7 +10,7 @@ use halo2_proofs::{
 use crate::utils::{to_be_bits, to_u32};
 
 /// The interface of the Bit Selector gadget.
-pub trait BitSelectorInstructions<F: PrimeField> {
+pub trait BitSelectorInstructions<F: PrimeFieldBits> {
     /// Given a byte and index, returns the bit at the given index
     /// (assuming a big-endian representation).
     fn select_bit(
@@ -27,7 +27,7 @@ pub struct BitSelectorChipConfig {
     index: Column<Advice>,
     bit: Column<Advice>,
 
-    /// Column of all bytes. Public so that it can be reused by other gadgets.
+    /// Column of all bytes (not unique). Public so that it can be reused by other gadgets.
     pub byte_column: TableColumn,
     index_column: TableColumn,
     bit_column: TableColumn,
@@ -36,14 +36,15 @@ pub struct BitSelectorChipConfig {
 }
 
 /// Implements a bit selector using a lookup table.
-/// The layout is a single row with a (byte, index, bit) tuple.
-pub struct BitSelectorChip<F: PrimeField> {
+/// The layout is a single row with a `(byte, index, bit)` tuple.
+/// Note that this implicitly range-checks `index` to be in `[0, 8)`.
+pub struct BitSelectorChip<F: PrimeFieldBits> {
     config: BitSelectorChipConfig,
 
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> BitSelectorChip<F> {
+impl<F: PrimeFieldBits> BitSelectorChip<F> {
     pub fn construct(config: BitSelectorChipConfig) -> Self {
         Self {
             config,
@@ -133,7 +134,7 @@ impl<F: PrimeField> BitSelectorChip<F> {
     }
 }
 
-impl<F: PrimeField> BitSelectorInstructions<F> for BitSelectorChip<F> {
+impl<F: PrimeFieldBits> BitSelectorInstructions<F> for BitSelectorChip<F> {
     fn select_bit(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -167,7 +168,7 @@ impl<F: PrimeField> BitSelectorInstructions<F> for BitSelectorChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use ff::PrimeField;
+    use ff::PrimeFieldBits;
     use halo2_proofs::halo2curves::bn256::Fr as Fp;
     use halo2_proofs::{
         circuit::{SimpleFloorPlanner, Value},
@@ -178,7 +179,7 @@ mod tests {
     use super::{BitSelectorChip, BitSelectorChipConfig, BitSelectorInstructions};
 
     #[derive(Default)]
-    struct MyCircuit<F: PrimeField> {
+    struct MyCircuit<F: PrimeFieldBits> {
         byte: u64,
         index: u64,
         _marker: PhantomData<F>,
@@ -190,7 +191,7 @@ mod tests {
         instance: Column<Instance>,
     }
 
-    impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
+    impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
         type Params = ();

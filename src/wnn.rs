@@ -164,6 +164,7 @@ impl Wnn {
             l: self.num_filter_hashes * (self.num_filter_entries as f32).log2() as usize,
             n_hashes: self.num_filter_hashes,
             bits_per_hash: (self.num_filter_entries as f32).log2() as usize,
+            bits_per_filter: self.num_filter_inputs,
         };
         WnnCircuit::new(hash_inputs, self.bloom_filters.clone(), params)
     }

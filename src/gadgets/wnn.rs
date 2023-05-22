@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use ff::PrimeField;
+use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
@@ -11,6 +11,7 @@ use crate::gadgets::{
     bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
     bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
     hash::{HashChip, HashConfig, HashInstructions},
+    range_check::RangeCheckConfig,
     response_accumulator::ResponseAccumulatorInstructions,
 };
 use crate::gadgets::{
@@ -18,10 +19,11 @@ use crate::gadgets::{
     response_accumulator::{ResponseAccumulatorChip, ResponseAccumulatorChipConfig},
 };
 
-pub trait WnnInstructions<F: PrimeField> {
+pub trait WnnInstructions<F: PrimeFieldBits> {
+    /// Given an input vector, predicts the score for each class.
     fn predict(
         &self,
-        layouter: &mut impl Layouter<F>,
+        layouter: impl Layouter<F>,
         bloom_filter_arrays: Array3<bool>,
         inputs: Vec<F>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
@@ -34,19 +36,26 @@ struct WnnConfig {
 }
 
 #[derive(Clone, Debug)]
-pub struct WnnChipConfig {
-    hash_chip_config: HashConfig,
+pub struct WnnChipConfig<F: PrimeFieldBits> {
+    hash_chip_config: HashConfig<F>,
     bloom_filter_chip_config: BloomFilterChipConfig,
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
 }
 
-struct WnnChip<F: PrimeField> {
-    config: WnnChipConfig,
+/// Implements a BTHOWeN- style weightless neural network.
+/// 
+/// This happens in three steps:
+/// 1. The [`HashChip`] is used to range-check and hash the inputs.
+/// 2. The [`BloomFilterChip`] is used to look up the bloom filter responses
+///    (for each input and each class).
+/// 3. The [`ResponseAccumulatorChip`] is used to accumulate the responses.
+struct WnnChip<F: PrimeFieldBits> {
+    config: WnnChipConfig<F>,
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> WnnChip<F> {
-    fn construct(config: WnnChipConfig) -> Self {
+impl<F: PrimeFieldBits> WnnChip<F> {
+    fn construct(config: WnnChipConfig<F>) -> Self {
         WnnChip {
             config,
             _marker: PhantomData,
@@ -57,7 +66,18 @@ impl<F: PrimeField> WnnChip<F> {
         meta: &mut ConstraintSystem<F>,
         advice_columns: [Column<Advice>; 6],
         wnn_config: WnnConfig,
-    ) -> WnnChipConfig {
+    ) -> WnnChipConfig<F> {
+        let bloom_filter_chip_config = BloomFilterChip::configure(
+            meta,
+            advice_columns,
+            wnn_config.bloom_filter_config.clone(),
+        );
+        let lookup_range_check_config = RangeCheckConfig::configure(
+            meta,
+            advice_columns[0],
+            // Re-use byte column of the bloom filter
+            bloom_filter_chip_config.byte_column,
+        );
         let hash_chip_config = HashChip::configure(
             meta,
             advice_columns[0],
@@ -65,12 +85,8 @@ impl<F: PrimeField> WnnChip<F> {
             advice_columns[2],
             advice_columns[3],
             advice_columns[4],
+            lookup_range_check_config,
             wnn_config.hash_function_config.clone(),
-        );
-        let bloom_filter_chip_config = BloomFilterChip::configure(
-            meta,
-            advice_columns,
-            wnn_config.bloom_filter_config.clone(),
         );
         let response_accumulator_chip_config =
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
@@ -82,10 +98,10 @@ impl<F: PrimeField> WnnChip<F> {
     }
 }
 
-impl<F: PrimeField> WnnInstructions<F> for WnnChip<F> {
+impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
     fn predict(
         &self,
-        layouter: &mut impl Layouter<F>,
+        mut layouter: impl Layouter<F>,
         bloom_filter_arrays: Array3<bool>,
         inputs: Vec<F>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
@@ -109,11 +125,11 @@ impl<F: PrimeField> WnnInstructions<F> for WnnChip<F> {
 
         let hashes = inputs
             .iter()
-            .map(|input| hash_chip.hash(layouter, *input))
+            .map(|input| hash_chip.hash(layouter.namespace(|| "hash"), *input))
             .collect::<Result<Vec<_>, _>>()?;
 
         let n_classes = bloom_filter_arrays.shape()[0];
-        bloom_filter_chip.load(layouter)?;
+        bloom_filter_chip.load(&mut layouter)?;
 
         let mut responses = vec![];
         for c in 0..n_classes {
@@ -121,7 +137,7 @@ impl<F: PrimeField> WnnInstructions<F> for WnnChip<F> {
             for (i, hash) in hashes.clone().iter().enumerate() {
                 let array_index = c * hashes.len() + i;
                 responses[c].push(bloom_filter_chip.bloom_lookup(
-                    layouter,
+                    &mut layouter,
                     hash.clone(),
                     F::from(array_index as u64),
                 )?);
@@ -131,15 +147,15 @@ impl<F: PrimeField> WnnInstructions<F> for WnnChip<F> {
         responses
             .iter()
             .map(|class_responses| {
-                response_accumulator_chip.accumulate_responses(layouter, class_responses)
+                response_accumulator_chip.accumulate_responses(&mut layouter, class_responses)
             })
             .collect::<Result<Vec<_>, _>>()
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct WnnCircuitConfig {
-    wnn_chip_config: WnnChipConfig,
+pub struct WnnCircuitConfig<F: PrimeFieldBits> {
+    wnn_chip_config: WnnChipConfig<F>,
     instance_column: Column<Instance>,
 }
 
@@ -149,16 +165,17 @@ pub struct WnnCircuitParams {
     pub l: usize,
     pub n_hashes: usize,
     pub bits_per_hash: usize,
+    pub bits_per_filter: usize,
 }
 
-pub struct WnnCircuit<F: PrimeField> {
+pub struct WnnCircuit<F: PrimeFieldBits> {
     inputs: Vec<u64>,
     bloom_filter_arrays: Array3<bool>,
     params: WnnCircuitParams,
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> WnnCircuit<F> {
+impl<F: PrimeFieldBits> WnnCircuit<F> {
     pub fn new(
         inputs: Vec<u64>,
         bloom_filter_arrays: Array3<bool>,
@@ -191,8 +208,8 @@ impl Default for WnnCircuitParams {
     }
 }
 
-impl<F: PrimeField> Circuit<F> for WnnCircuit<F> {
-    type Config = WnnCircuitConfig;
+impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
+    type Config = WnnCircuitConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
     type Params = WnnCircuitParams;
 
@@ -236,6 +253,7 @@ impl<F: PrimeField> Circuit<F> for WnnCircuit<F> {
         let hash_function_config = HashFunctionConfig {
             p: params.p,
             l: params.l,
+            n_bits: params.bits_per_filter,
         };
         let wnn_config = WnnConfig {
             bloom_filter_config,
@@ -255,7 +273,7 @@ impl<F: PrimeField> Circuit<F> for WnnCircuit<F> {
         let wnn_chip = WnnChip::construct(config.wnn_chip_config);
 
         let result = wnn_chip.predict(
-            &mut layouter,
+            layouter.namespace(|| "wnn"),
             self.bloom_filter_arrays.clone(),
             self.inputs.iter().map(|v| F::from(*v)).collect(),
         )?;
@@ -286,6 +304,7 @@ mod tests {
         l: 20,
         n_hashes: 2,
         bits_per_hash: 10,
+        bits_per_filter: 15,
     };
 
     #[test]

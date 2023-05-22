@@ -1,5 +1,5 @@
 use crate::utils::{decompose_word_be, enable_range, from_be_bits, to_u32};
-use ff::PrimeField;
+use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector, TableColumn},
@@ -13,14 +13,14 @@ use super::BloomFilterConfig;
 ///
 /// `word` should be split into bytes. Then, the byte and bit index can be used to extract the bit.
 #[derive(Debug)]
-pub struct LookupResult<F: PrimeField> {
+pub struct LookupResult<F: PrimeFieldBits> {
     pub word: AssignedCell<F, F>,
     pub byte_index: AssignedCell<F, F>,
     pub bit_index: AssignedCell<F, F>,
 }
 
 /// Interface of the Array Lookup gadget.
-pub trait ArrayLookupInstructions<F: PrimeField> {
+pub trait ArrayLookupInstructions<F: PrimeFieldBits> {
     /// Given a hash value and a bloom index, decomposes the hash, looks up the word in the bloom array
     /// and returns the word, byte index and bit index for each hash value.
     fn array_lookup(
@@ -100,12 +100,27 @@ pub struct ArrayLookupChipConfig {
 /// | hash (copy)           | byte_index_0 | bit_index_0 | bloom_index (copy) | word_0      |
 /// | hash >> bits_per_hash | byte_index_1 | bit_index_1 | bloom_index (copy) | word_1      |
 /// | 0 (constant)          |              |             |                    |             |
-pub struct ArrayLookupChip<F: PrimeField> {
+///
+/// This gadget enforces that the tuple `(bloom_index, word_index, bloom_value)` appears in the table, where:
+/// - `bloom_index` is the provided bloom index
+/// - `bloom_value` is the provided bloom value
+/// - `word_index` is computed as `(current_hash - byte_index << 3 - bit_index) >> (bits_per_hash - word_index_bits)`
+///   and `current_hash[i] = hash[i] - hash[i+1] * 2^{bits_per_hash}`.
+///
+/// This gadget assumes that elsewhere in the circuit, the following range checks are performed:
+/// - `bit_index` is in `[0, 8)`.
+/// - `byte_index` is in `[0, 2^{bits_per_hash - word_index_bits - 3})`.
+///
+/// Note that this implicitly range-checks that:
+/// - `current_hash` is `bits_per_hash` bits long (otherwise it wouldn't appear in the table).
+/// - `hash` is `bits_per_hash * n_hashes` bits long (otherwise the hash decomposition
+///    wouldn't end with a constant `0` after `n_hashes + 1` rows).
+pub struct ArrayLookupChip<F: PrimeFieldBits> {
     config: ArrayLookupChipConfig,
     bloom_filter_words: Vec<Vec<F>>,
 }
 
-impl<F: PrimeField> ArrayLookupChip<F> {
+impl<F: PrimeFieldBits> ArrayLookupChip<F> {
     /// Constructs a new instance of the Array Lookup gadget.
     pub fn construct(config: ArrayLookupChipConfig, bloom_filter_arrays: &Array2<bool>) -> Self {
         let bloom_filter_words = Self::compute_bloom_filter_words(
@@ -286,7 +301,7 @@ impl<F: PrimeField> ArrayLookupChip<F> {
     }
 }
 
-impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
+impl<F: PrimeFieldBits> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
     fn array_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -444,7 +459,7 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use ff::PrimeField;
+    use ff::PrimeFieldBits;
     use halo2_proofs::{
         circuit::{SimpleFloorPlanner, Value},
         dev::MockProver,
@@ -460,7 +475,7 @@ mod tests {
     };
 
     #[derive(Default)]
-    struct MyCircuit<F: PrimeField> {
+    struct MyCircuit<F: PrimeFieldBits> {
         input: u64,
         bloom_index: u64,
         bloom_filter_arrays: Array2<bool>,
@@ -474,7 +489,7 @@ mod tests {
         instance: Column<Instance>,
     }
 
-    impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
+    impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
         type Params = ();

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use ff::PrimeField;
+use ff::{PrimeField, PrimeFieldBits};
 use halo2_proofs::{
     circuit::{Region, Value},
     plonk::{Error, Selector},
@@ -8,12 +8,12 @@ use halo2_proofs::{
 use num_bigint::BigUint;
 
 #[allow(dead_code)]
-pub fn print_value<F: PrimeField>(name: &str, value: Value<&F>) {
+pub fn print_value<F: PrimeFieldBits>(name: &str, value: Value<&F>) {
     value.map(|x| println!("{name}: {:#01x}", to_u32(x)));
 }
 
 #[allow(dead_code)]
-pub fn print_values<F: PrimeField>(name: &str, values: &Vec<Value<F>>) {
+pub fn print_values<F: PrimeFieldBits>(name: &str, values: &Vec<Value<F>>) {
     values.iter().for_each(|value| {
         value.map(|x| println!("{name}: {:#01x}", to_u32(&x)));
     });
@@ -54,19 +54,14 @@ pub fn integer_division<F: PrimeField>(x: F, divisor: BigUint) -> F {
         .fold(F::ZERO, |acc, b| acc * shift_factor + F::from(*b as u64))
 }
 
-/// Implement to_le_bits for any `PrimeField` type, not just `PrimeFieldBits`
-/// For example, the BN256 Fr type does not implement PrimeFieldBits
-pub fn to_be_bits<F: PrimeField>(x: &F, n_bits: usize) -> Vec<bool> {
-    // This assumes numbers are stored in little endian order
-    let mut x = BigUint::from_bytes_le(x.to_repr().as_ref());
-
-    let mut result = vec![];
-    let zero = BigUint::from(0u8);
-    let one = BigUint::from(1u8);
-    for _ in 0..n_bits {
-        result.push(if (&x & &one) == zero { false } else { true });
-        x >>= 1;
-    }
+/// Return the big-endian bits of `x` as a vector of `n_bits` (least significant) bits.
+pub fn to_be_bits<F: PrimeFieldBits>(x: &F, n_bits: usize) -> Vec<bool> {
+    let mut result = x
+        .to_le_bits()
+        .iter()
+        .by_vals()
+        .take(n_bits)
+        .collect::<Vec<_>>();
 
     // Convert to big endian order
     result.reverse();
@@ -86,7 +81,7 @@ pub fn from_be_bits<F: PrimeField>(bits: &[bool]) -> F {
     result
 }
 
-pub fn decompose_word_be<F: PrimeField>(
+pub fn decompose_word_be<F: PrimeFieldBits>(
     word: &F,
     num_windows: usize,
     window_num_bits: usize,
@@ -104,7 +99,7 @@ pub fn decompose_word_be<F: PrimeField>(
         .collect()
 }
 
-pub fn to_u32<F: PrimeField>(field_element: &F) -> u32 {
+pub fn to_u32<F: PrimeFieldBits>(field_element: &F) -> u32 {
     to_be_bits(field_element, 32)
         .iter()
         .fold(0u32, |acc, b| (acc << 1) + (*b as u32))

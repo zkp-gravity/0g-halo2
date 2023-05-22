@@ -8,8 +8,15 @@ name = "zero_g"
 path = "src/lib.rs"
 
 [dependencies]
+# For now, we use a fork of PSE's Halo2 which uses a more recent version of halo2curves.
+# With the next halo2curves release, we can open a PR to halo2, see:
+# https://github.com/privacy-scaling-explorations/halo2curves/pull/45
+halo2_proofs = { git = "https://github.com/georgwiese/halo2.git", branch = "update-halo2curves", package = "halo2_proofs", features = [
+    "dev-graph",
+    "circuit-params",
+] }
+halo2_gadgets = { git = "https://github.com/georgwiese/halo2.git", branch = "update-halo2curves", package = "halo2_gadgets" }
 plotters = { version = "0.3.0" }
-halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2023_04_20", features = ["dev-graph", "circuit-params"] }
 num-bigint = "0.4.3"
 hdf5 = "0.8.1"
 ndarray = "0.15.6"
