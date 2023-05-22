@@ -1,5 +1,5 @@
 use crate::utils::{decompose_word_be, enable_range, from_be_bits, to_u32};
-use ff::PrimeField;
+use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector, TableColumn},
@@ -13,14 +13,14 @@ use super::BloomFilterConfig;
 ///
 /// `word` should be split into bytes. Then, the byte and bit index can be used to extract the bit.
 #[derive(Debug)]
-pub struct LookupResult<F: PrimeField> {
+pub struct LookupResult<F: PrimeFieldBits> {
     pub word: AssignedCell<F, F>,
     pub byte_index: AssignedCell<F, F>,
     pub bit_index: AssignedCell<F, F>,
 }
 
 /// Interface of the Array Lookup gadget.
-pub trait ArrayLookupInstructions<F: PrimeField> {
+pub trait ArrayLookupInstructions<F: PrimeFieldBits> {
     /// Given a hash value and a bloom index, decomposes the hash, looks up the word in the bloom array
     /// and returns the word, byte index and bit index for each hash value.
     fn array_lookup(
@@ -100,12 +100,12 @@ pub struct ArrayLookupChipConfig {
 /// | hash (copy)           | byte_index_0 | bit_index_0 | bloom_index (copy) | word_0      |
 /// | hash >> bits_per_hash | byte_index_1 | bit_index_1 | bloom_index (copy) | word_1      |
 /// | 0 (constant)          |              |             |                    |             |
-pub struct ArrayLookupChip<F: PrimeField> {
+pub struct ArrayLookupChip<F: PrimeFieldBits> {
     config: ArrayLookupChipConfig,
     bloom_filter_words: Vec<Vec<F>>,
 }
 
-impl<F: PrimeField> ArrayLookupChip<F> {
+impl<F: PrimeFieldBits> ArrayLookupChip<F> {
     /// Constructs a new instance of the Array Lookup gadget.
     pub fn construct(config: ArrayLookupChipConfig, bloom_filter_arrays: &Array2<bool>) -> Self {
         let bloom_filter_words = Self::compute_bloom_filter_words(
@@ -286,7 +286,7 @@ impl<F: PrimeField> ArrayLookupChip<F> {
     }
 }
 
-impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
+impl<F: PrimeFieldBits> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
     fn array_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -444,7 +444,7 @@ impl<F: PrimeField> ArrayLookupInstructions<F> for ArrayLookupChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use ff::PrimeField;
+    use ff::PrimeFieldBits;
     use halo2_proofs::{
         circuit::{SimpleFloorPlanner, Value},
         dev::MockProver,
@@ -460,7 +460,7 @@ mod tests {
     };
 
     #[derive(Default)]
-    struct MyCircuit<F: PrimeField> {
+    struct MyCircuit<F: PrimeFieldBits> {
         input: u64,
         bloom_index: u64,
         bloom_filter_arrays: Array2<bool>,
@@ -474,7 +474,7 @@ mod tests {
         instance: Column<Instance>,
     }
 
-    impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
+    impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
         type Params = ();

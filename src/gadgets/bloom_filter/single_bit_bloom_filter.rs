@@ -2,7 +2,7 @@
 use std::marker::PhantomData;
 
 use crate::utils::{decompose_word_be, to_u32};
-use ff::PrimeField;
+use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Selector, TableColumn},
@@ -51,13 +51,13 @@ pub struct BloomFilterChipConfig {
 /// When that happens, it could be improved by getting rid of the
 /// `hash_accumulator` column and using an approach similar to [`super::ArrayLookupChip`].
 /// This will also remove the need for the hash equality gate.
-pub struct BloomFilterChip<F: PrimeField> {
+pub struct BloomFilterChip<F: PrimeFieldBits> {
     config: BloomFilterChipConfig,
     bloom_filter_arrays: Option<Array2<bool>>,
     _marker: PhantomData<F>,
 }
 
-impl<F: PrimeField> BloomFilterChip<F> {
+impl<F: PrimeFieldBits> BloomFilterChip<F> {
     pub fn construct(config: BloomFilterChipConfig) -> Self {
         BloomFilterChip {
             config,
@@ -195,7 +195,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
     }
 }
 
-impl<F: PrimeField> BloomFilterInstructions<F> for BloomFilterChip<F> {
+impl<F: PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterChip<F> {
     fn bloom_lookup(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -376,7 +376,7 @@ impl<F: PrimeField> BloomFilterInstructions<F> for BloomFilterChip<F> {
 mod tests {
     use std::marker::PhantomData;
 
-    use ff::PrimeField;
+    use ff::PrimeFieldBits;
     use halo2_proofs::{
         circuit::{SimpleFloorPlanner, Value},
         dev::MockProver,
@@ -390,7 +390,7 @@ mod tests {
     };
 
     #[derive(Default)]
-    struct MyCircuit<F: PrimeField> {
+    struct MyCircuit<F: PrimeFieldBits> {
         input: u64,
         bloom_index: u64,
         bloom_filter_arrays: Array2<bool>,
@@ -404,7 +404,7 @@ mod tests {
         instance: Column<Instance>,
     }
 
-    impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
+    impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
         type Config = Config;
         type FloorPlanner = SimpleFloorPlanner;
         type Params = ();
