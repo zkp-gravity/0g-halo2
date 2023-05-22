@@ -15,7 +15,7 @@ use std::marker::PhantomData;
 use ff::PrimeField;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter},
-    plonk::{Advice, Column, ConstraintSystem, Error},
+    plonk::{Advice, Column, ConstraintSystem, Error, TableColumn},
 };
 use ndarray::Array2;
 
@@ -65,6 +65,9 @@ pub struct BloomFilterChipConfig {
     byte_selector_config: ByteSelectorChipConfig,
     bit_selector_config: BitSelectorChipConfig,
     and_bits_config: AndBitsChipConfig,
+
+    // A column of all bytes (not unique). Public so that it can be reused by other gadgets.
+    pub byte_column: TableColumn,
 }
 
 /// Implements a bloom filter lookup using a 3-way lookup strategy.
@@ -131,6 +134,10 @@ impl<F: PrimeField> BloomFilterChip<F> {
             advice_columns[1],
             advice_columns[2],
         );
+
+        // Reuse byte column of bit selector chip
+        let byte_column = bit_selector_config.byte_column;
+
         let byte_selector_config = ByteSelectorChip::configure(
             meta,
             advice_columns[0],
@@ -139,8 +146,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
             advice_columns[3],
             advice_columns[4],
             advice_columns[5],
-            // Reuse byte column of bit selector chip
-            bit_selector_config.byte_column,
+            byte_column,
         );
         let and_bits_config = AndBitsChip::configure(meta, advice_columns[4], advice_columns[5]);
 
@@ -149,6 +155,7 @@ impl<F: PrimeField> BloomFilterChip<F> {
             byte_selector_config,
             bit_selector_config,
             and_bits_config,
+            byte_column,
         }
     }
 }

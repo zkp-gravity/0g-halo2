@@ -1,10 +1,9 @@
 use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
-use halo2_gadgets::utilities::lookup_range_check::LookupRangeCheckConfig;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, TableColumn},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
 };
 use ndarray::{array, Array3};
 
@@ -12,14 +11,13 @@ use crate::gadgets::{
     bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
     bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
     hash::{HashChip, HashConfig, HashInstructions},
+    range_check::RangeCheckConfig,
     response_accumulator::ResponseAccumulatorInstructions,
 };
 use crate::gadgets::{
     hash::HashFunctionConfig,
     response_accumulator::{ResponseAccumulatorChip, ResponseAccumulatorChipConfig},
 };
-
-use super::range_check::load_bytes_column;
 
 pub trait WnnInstructions<F: PrimeFieldBits> {
     fn predict(
@@ -59,11 +57,19 @@ impl<F: PrimeFieldBits> WnnChip<F> {
     fn configure(
         meta: &mut ConstraintSystem<F>,
         advice_columns: [Column<Advice>; 6],
-        range_check_table: TableColumn,
         wnn_config: WnnConfig,
     ) -> WnnChipConfig<F> {
-        let lookup_range_check_config =
-            LookupRangeCheckConfig::configure(meta, advice_columns[0], range_check_table);
+        let bloom_filter_chip_config = BloomFilterChip::configure(
+            meta,
+            advice_columns,
+            wnn_config.bloom_filter_config.clone(),
+        );
+        let lookup_range_check_config = RangeCheckConfig::configure(
+            meta,
+            advice_columns[0],
+            // Re-use byte column of the bloom filter
+            bloom_filter_chip_config.byte_column,
+        );
         let hash_chip_config = HashChip::configure(
             meta,
             advice_columns[0],
@@ -73,11 +79,6 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             advice_columns[4],
             lookup_range_check_config,
             wnn_config.hash_function_config.clone(),
-        );
-        let bloom_filter_chip_config = BloomFilterChip::configure(
-            meta,
-            advice_columns,
-            wnn_config.bloom_filter_config.clone(),
         );
         let response_accumulator_chip_config =
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
@@ -147,7 +148,6 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
 #[derive(Debug, Clone)]
 pub struct WnnCircuitConfig<F: PrimeFieldBits> {
     wnn_chip_config: WnnChipConfig<F>,
-    range_check_table: TableColumn,
     instance_column: Column<Instance>,
 }
 
@@ -237,7 +237,6 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
 
         let constants = meta.fixed_column();
         meta.enable_constant(constants);
-        let range_check_table = meta.lookup_table_column();
 
         let bloom_filter_config = BloomFilterConfig {
             n_hashes: params.n_hashes,
@@ -253,13 +252,7 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
             hash_function_config,
         };
         WnnCircuitConfig {
-            wnn_chip_config: WnnChip::configure(
-                meta,
-                advice_columns,
-                range_check_table,
-                wnn_config,
-            ),
-            range_check_table,
+            wnn_chip_config: WnnChip::configure(meta, advice_columns, wnn_config),
             instance_column,
         }
     }
@@ -269,7 +262,6 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
         config: Self::Config,
         mut layouter: impl halo2_proofs::circuit::Layouter<F>,
     ) -> Result<(), halo2_proofs::plonk::Error> {
-        load_bytes_column(&mut layouter, config.range_check_table)?;
         let wnn_chip = WnnChip::construct(config.wnn_chip_config);
 
         let result = wnn_chip.predict(

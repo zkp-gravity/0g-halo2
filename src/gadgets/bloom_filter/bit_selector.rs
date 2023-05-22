@@ -27,7 +27,7 @@ pub struct BitSelectorChipConfig {
     index: Column<Advice>,
     bit: Column<Advice>,
 
-    /// Column of all bytes. Public so that it can be reused by other gadgets.
+    /// Column of all bytes (not unique). Public so that it can be reused by other gadgets.
     pub byte_column: TableColumn,
     index_column: TableColumn,
     bit_column: TableColumn,

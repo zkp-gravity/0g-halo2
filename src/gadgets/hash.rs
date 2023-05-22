@@ -8,7 +8,7 @@ use num_bigint::BigUint;
 
 use crate::utils::integer_division;
 
-use super::range_check::{range_check, RangeCheckConfig};
+use super::range_check::RangeCheckConfig;
 
 pub trait HashInstructions<F: PrimeFieldBits> {
     fn hash(&self, layouter: impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error>;
@@ -161,21 +161,18 @@ impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
         // Check that all cells have the right number of bits, with two exceptions:
         // - output should be l bits, but it's later decomposed and used in a table lookup, which enforces the range
         // - remainder should be l + 1 bits, but does not need to be range-checked, because we verify that r = 2^l * msb + output
-        range_check(
+        self.config.range_check_config.range_check(
             layouter.namespace(|| "range check input"),
-            self.config.range_check_config,
             input,
             n_bits,
         )?;
-        range_check(
+        self.config.range_check_config.range_check(
             layouter.namespace(|| "range check quotient"),
-            self.config.range_check_config,
             quotient,
             n_bits * 3 - l,
         )?;
-        range_check(
+        self.config.range_check_config.range_check(
             layouter.namespace(|| "range check msb"),
-            self.config.range_check_config,
             msb,
             1,
         )?;
@@ -191,7 +188,6 @@ mod tests {
     use std::marker::PhantomData;
 
     use ff::PrimeFieldBits;
-    use halo2_gadgets::utilities::lookup_range_check::LookupRangeCheckConfig;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
         dev::MockProver,
@@ -199,7 +195,7 @@ mod tests {
         plonk::{Circuit, Column, Instance, TableColumn},
     };
 
-    use crate::gadgets::range_check::load_bytes_column;
+    use crate::gadgets::range_check::RangeCheckConfig;
 
     use super::{HashChip, HashConfig, HashFunctionConfig, HashInstructions};
 
@@ -252,7 +248,7 @@ mod tests {
 
             let table_column = meta.lookup_table_column();
             // Reuse input column
-            let lookup_range_check = LookupRangeCheckConfig::configure(meta, input, table_column);
+            let lookup_range_check = RangeCheckConfig::configure(meta, input, table_column);
 
             Config {
                 hash_config: HashChip::configure(
@@ -275,7 +271,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
         ) -> Result<(), halo2_proofs::plonk::Error> {
-            load_bytes_column(&mut layouter, config.table_column)?;
+            RangeCheckConfig::<F>::load_bytes_column(&mut layouter, config.table_column)?;
             let hash_chip = HashChip::construct(config.hash_config);
             let hash_value = hash_chip.hash(layouter.namespace(|| "hash"), F::from(self.input))?;
 
