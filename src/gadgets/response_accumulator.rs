@@ -27,6 +27,17 @@ pub struct ResponseAccumulatorChip<F: PrimeField> {
     _marker: PhantomData<F>,
 }
 
+/// Accumulates responses by summing them up.
+///
+/// The layout is as follows (example with 7 values):
+///
+/// | a1 | a2 | a3 | a4           | acc            |
+/// |----|----|----|--------------|----------------|
+/// | b1 | b2 | b3 | b4           | 0 (constant)   |
+/// | b5 | b6 | b7 | 0 (constant) | acc_1          |
+/// |    |    |    |              | acc_2 (result) |
+///
+/// The gadget enforces that: `acc[i + 1] = acc[i] + a1[i] + a2[i] + a3[i] + a4[i]`.
 impl<F: PrimeField> ResponseAccumulatorChip<F> {
     pub fn construct(config: ResponseAccumulatorChipConfig) -> Self {
         Self {

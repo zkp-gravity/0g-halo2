@@ -100,6 +100,21 @@ pub struct ArrayLookupChipConfig {
 /// | hash (copy)           | byte_index_0 | bit_index_0 | bloom_index (copy) | word_0      |
 /// | hash >> bits_per_hash | byte_index_1 | bit_index_1 | bloom_index (copy) | word_1      |
 /// | 0 (constant)          |              |             |                    |             |
+///
+/// This gadget enforces that the tuple `(bloom_index, word_index, bloom_value)` appears in the table, where:
+/// - `bloom_index` is the provided bloom index
+/// - `bloom_value` is the provided bloom value
+/// - `word_index` is computed as `(current_hash - byte_index << 3 - bit_index) >> (bits_per_hash - word_index_bits)`
+///   and `current_hash[i] = hash[i] - hash[i+1] * 2^{bits_per_hash}`.
+///
+/// This gadget assumes that elsewhere in the circuit, the following range checks are performed:
+/// - `bit_index` is in `[0, 8)`.
+/// - `byte_index` is in `[0, 2^{bits_per_hash - word_index_bits - 3})`.
+///
+/// Note that this implicitly range-checks that:
+/// - `current_hash` is `bits_per_hash` bits long (otherwiseit wouldn't appear in the table).
+/// - `hash` is `bits_per_hash * n_hashes` bits long (otherwise the hash decomposition
+///    wouldn't end with a constant `0` after `n_hashes + 1` rows).
 pub struct ArrayLookupChip<F: PrimeFieldBits> {
     config: ArrayLookupChipConfig,
     bloom_filter_words: Vec<Vec<F>>,

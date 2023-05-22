@@ -36,7 +36,8 @@ pub struct BitSelectorChipConfig {
 }
 
 /// Implements a bit selector using a lookup table.
-/// The layout is a single row with a (byte, index, bit) tuple.
+/// The layout is a single row with a `(byte, index, bit)` tuple.
+/// Note that this implicitly range-checks `index` to be in `[0, 8)`.
 pub struct BitSelectorChip<F: PrimeFieldBits> {
     config: BitSelectorChipConfig,
 

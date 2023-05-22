@@ -20,6 +20,7 @@ use crate::gadgets::{
 };
 
 pub trait WnnInstructions<F: PrimeFieldBits> {
+    /// Given an input vector, predicts the score for each class.
     fn predict(
         &self,
         layouter: impl Layouter<F>,
@@ -41,6 +42,13 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
 }
 
+/// Implements a BTHOWeN- style weightless neural network.
+/// 
+/// This happens in three steps:
+/// 1. The [`HashChip`] is used to range-check and hash the inputs.
+/// 2. The [`BloomFilterChip`] is used to look up the bloom filter responses
+///    (for each input and each class).
+/// 3. The [`ResponseAccumulatorChip`] is used to accumulate the responses.
 struct WnnChip<F: PrimeFieldBits> {
     config: WnnChipConfig<F>,
     _marker: PhantomData<F>,

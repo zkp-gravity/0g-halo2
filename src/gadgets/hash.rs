@@ -16,11 +16,12 @@ pub trait HashInstructions<F: PrimeFieldBits> {
 
 #[derive(Debug, Clone)]
 pub struct HashFunctionConfig {
-    /// Prime to use in the hash function
+    /// Prime to use in the hash function.
     pub p: u64,
-    /// number of bits for the hash function output
+    /// number of bits for the hash function output.
+    /// This has to be one less than the number of bits needed to represent `p`.
     pub l: usize,
-    /// Number of input bits (for the range checks)
+    /// Number of input bits.
     pub n_bits: usize,
 }
 
@@ -36,6 +37,26 @@ pub struct HashConfig<F: PrimeFieldBits> {
     pub hash_function_config: HashFunctionConfig,
 }
 
+/// Implements the "MishMash" hash function: `h(x) = (x^3 % p) % 2^l`.
+///
+/// Parameters for the hash function are specified in [`HashFunctionConfig`].
+///
+/// The layout is as follows:
+///
+/// | input    | quotient | remainder | msb              | hash            |
+/// |----------|----------|-----------|------------------|-----------------|
+/// | x (copy) | x^3 // p | x^3 % p   | (x^3 % p) // 2^l | (x^3 % p) % 2^l |
+///
+/// The following constraints are checked:
+/// - `x^3 = quotient * p + remainder`
+/// - `remainder = msb * 2^l + hash`
+/// - `x` is in [0, 2^n_bits)
+/// - `quotient` is in [0, 2^(3 * n_bits - l))
+/// - `msb` is in 0 or 1
+/// - `remainder` is in [0, p)
+///
+/// Note that the `hash` column is not range-checked to be in [0, 2^l).
+/// This is assumed to happen elsewhere in the circuit.
 #[derive(Debug, Clone)]
 pub struct HashChip<F: PrimeFieldBits> {
     config: HashConfig<F>,
