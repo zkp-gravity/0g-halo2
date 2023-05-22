@@ -7,10 +7,6 @@ use crate::wnn::Wnn;
 
 pub fn load_wnn(path: &Path) -> Result<Wnn> {
     let file = File::open(path)?;
-    for attr_name in file.attr_names()? {
-        let attr = file.attr(&attr_name)?.read_scalar::<i64>()?;
-        println!("{attr_name}: {attr}");
-    }
 
     let num_classes = file.attr("num_classes")?.read_scalar::<i64>()? as usize;
     let num_inputs = file.attr("num_inputs")?.read_scalar::<i64>()? as usize;
