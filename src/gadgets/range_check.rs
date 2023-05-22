@@ -6,11 +6,12 @@ use halo2_proofs::{
     poly::Rotation,
 };
 
+/// The number of bits per word.
 const K: usize = 8;
 
 /// A wrapper around [`LookupRangeCheckConfig`] which uses `K = 8`, i.e., 8 bits per word.
 /// It can check for an arbitrary number of bits and implements a less-or-equal check.
-/// 
+///
 /// It uses a single advice column.
 #[derive(Clone, Debug)]
 pub struct RangeCheckConfig<F: PrimeFieldBits> {
@@ -20,6 +21,8 @@ pub struct RangeCheckConfig<F: PrimeFieldBits> {
 }
 
 impl<F: PrimeFieldBits> RangeCheckConfig<F> {
+    /// Configure the range check with an advice column and a table column filled with all possible
+    /// byte values.
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         advice_column: Column<Advice>,
@@ -30,7 +33,14 @@ impl<F: PrimeFieldBits> RangeCheckConfig<F> {
 
         let le_selector = meta.selector();
         meta.create_gate("le", |meta| {
-            // The prover has to provide a diff s.t. x + diff = y
+            // Layout:
+            // | advice       | selector |
+            // |--------------|----------|
+            // | x (copy)     |          |
+            // | y (constant) | X        |
+            // | diff         |          |
+            //
+            // The prover has to provide a diff s.t. x + diff = y.
             let le_selector = meta.query_selector(le_selector);
 
             let x = meta.query_advice(advice_column, Rotation::prev());
@@ -63,21 +73,25 @@ impl<F: PrimeFieldBits> RangeCheckConfig<F> {
                 x.copy_advice(|| "x", &mut region, self.advice_column, 0)?;
                 region.assign_advice_from_constant(|| "y", self.advice_column, 1, y)?;
                 let diff_cell = region.assign_advice(|| "diff", self.advice_column, 2, || diff)?;
+
                 self.le_selector.enable(&mut region, 1)?;
+
                 Ok(diff_cell)
             },
         )?;
 
+        // Compute the number of bits needed to represent y
         let y_bits = y.to_le_bits();
         let n_bits = y_bits.len() - y_bits.trailing_zeros();
 
+        // Check that the diff is in the range [0, 2^n_bits)
         self.range_check(layouter, diff_cell, n_bits)?;
 
         Ok(())
     }
 
     /// Check that the given input is in the range [0, 2^n_bits).
-    /// It first decomposes the input into bytes and then performs a "short" range check on the last byte.
+    /// It first decomposes the input into bytes and then performs a "short" range check on the last byte (if 8 does not divide `n_bits`).
     pub fn range_check(
         &self,
         mut layouter: impl Layouter<F>,
@@ -213,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_le_equal() {
+    fn test_le_equal_10bit() {
         let k = 9;
         let circuit = MyCircuit::<Fp> {
             x: 1023,
@@ -225,7 +239,7 @@ mod tests {
     }
 
     #[test]
-    fn test_le_less() {
+    fn test_le_less_10bit() {
         let k = 9;
         let circuit = MyCircuit::<Fp> {
             x: 1022,
@@ -237,7 +251,7 @@ mod tests {
     }
 
     #[test]
-    fn test_le_greater() {
+    fn test_le_greater_10bit() {
         let k = 9;
         let circuit = MyCircuit::<Fp> {
             x: 1024,
@@ -246,6 +260,30 @@ mod tests {
         };
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         assert!(prover.verify().is_err());
+    }
+
+    #[test]
+    fn test_le_less_4bit() {
+        let k = 9;
+        let circuit = MyCircuit::<Fp> {
+            x: 4,
+            y: 9,
+            _marker: PhantomData,
+        };
+        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+        prover.assert_satisfied();
+    }
+
+    #[test]
+    fn test_le_less_32bit() {
+        let k = 9;
+        let circuit = MyCircuit::<Fp> {
+            x: 0,
+            y: 0xffabcdef,
+            _marker: PhantomData,
+        };
+        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+        prover.assert_satisfied();
     }
 
     #[test]

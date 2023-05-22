@@ -112,7 +112,7 @@ pub struct ArrayLookupChipConfig {
 /// - `byte_index` is in `[0, 2^{bits_per_hash - word_index_bits - 3})`.
 ///
 /// Note that this implicitly range-checks that:
-/// - `current_hash` is `bits_per_hash` bits long (otherwiseit wouldn't appear in the table).
+/// - `current_hash` is `bits_per_hash` bits long (otherwise it wouldn't appear in the table).
 /// - `hash` is `bits_per_hash * n_hashes` bits long (otherwise the hash decomposition
 ///    wouldn't end with a constant `0` after `n_hashes + 1` rows).
 pub struct ArrayLookupChip<F: PrimeFieldBits> {

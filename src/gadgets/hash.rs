@@ -272,7 +272,6 @@ mod tests {
             };
 
             let table_column = meta.lookup_table_column();
-            // Reuse input column
             let lookup_range_check = RangeCheckConfig::configure(meta, input, table_column);
 
             Config {
