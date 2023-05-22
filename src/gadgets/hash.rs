@@ -152,11 +152,10 @@ impl<F: PrimeFieldBits> HashChip<F> {
 
 impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
     fn hash(&self, mut layouter: impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error> {
-        let (input, quotient, _remainder, msb, output) =
+        let (input, quotient, remainder, msb, output) =
             self.compute_hash(layouter.namespace(|| "hash"), input)?;
 
-        let l = self.config.hash_function_config.l;
-        let n_bits = self.config.hash_function_config.n_bits;
+        let HashFunctionConfig { p, l, n_bits } = self.config.hash_function_config;
 
         // Check that all cells have the right number of bits, with two exceptions:
         // - output should be l bits, but it's later decomposed and used in a table lookup, which enforces the range
@@ -177,7 +176,12 @@ impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
             1,
         )?;
 
-        // TODO: Check that remainder < p!
+        // Additionally, we have to check that remainder < p
+        self.config.range_check_config.le_constant(
+            layouter.namespace(|| "remainder < p"),
+            remainder,
+            F::from(p - 1),
+        )?;
 
         Ok(output)
     }
