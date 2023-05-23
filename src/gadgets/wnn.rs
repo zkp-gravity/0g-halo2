@@ -59,13 +59,13 @@ struct WnnChip<F: PrimeFieldBits> {
 
 impl<F: PrimeFieldBits> WnnChip<F> {
     fn construct(config: WnnChipConfig<F>, bloom_filter_arrays: Array3<bool>) -> Self {
-        let n_classes = bloom_filter_arrays.shape()[0];
-        let n_inputs = bloom_filter_arrays.shape()[1];
+        let shape = bloom_filter_arrays.shape();
+        let n_classes = shape[0];
+        let n_inputs = shape[1];
+        let n_filters = shape[2];
 
         // Flatten array: from shape (C, N, B) to (C * N, B)
-        let shape = bloom_filter_arrays.shape();
-        let new_shape = (shape[0] * shape[1], shape[2]);
-        let bloom_filter_arrays_flat = bloom_filter_arrays.into_shape(new_shape).unwrap();
+        let bloom_filter_arrays_flat = bloom_filter_arrays.into_shape((n_classes * n_inputs, n_filters)).unwrap();
 
         let hash_chip = HashChip::construct(config.hash_chip_config.clone());
         let bloom_filter_chip = BloomFilterChip::construct(
