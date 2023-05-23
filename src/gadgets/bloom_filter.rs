@@ -10,8 +10,6 @@
 //!   which is set automatically such that the two are roughly equal.
 //!
 //! Both gadgets implement the [`BloomFilterInstructions`] trait and can be used interchangibly.
-use std::marker::PhantomData;
-
 use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter},
@@ -81,35 +79,38 @@ pub struct BloomFilterChipConfig {
 ///    lookup.
 /// 4. The [`AndBitsChip`] is used to and together the bits.
 pub struct BloomFilterChip<F: PrimeFieldBits> {
-    config: BloomFilterChipConfig,
-    bloom_filter_arrays: Array2<bool>,
-    _marker: PhantomData<F>,
+    array_lookup_chip: ArrayLookupChip<F>,
+    byte_selector_chip: ByteSelectorChip<F>,
+    bit_selector_chip: BitSelectorChip<F>,
+    and_bits_chip: AndBitsChip<F>,
 }
 
 impl<F: PrimeFieldBits> BloomFilterChip<F> {
     /// Constructs a new bloom filter chip.
-    pub fn construct(config: BloomFilterChipConfig, bloom_filter_arrays: Array2<bool>) -> Self {
+    pub fn construct(config: BloomFilterChipConfig, bloom_filter_arrays: &Array2<bool>) -> Self {
+        let array_lookup_chip =
+            ArrayLookupChip::construct(config.array_lookup_config.clone(), bloom_filter_arrays);
+        let byte_selector_chip =
+            ByteSelectorChip::<F>::construct(config.byte_selector_config.clone());
+        let bit_selector_chip = BitSelectorChip::<F>::construct(config.bit_selector_config.clone());
+        let and_bits_chip = AndBitsChip::<F>::construct(config.and_bits_config.clone());
+
         Self {
-            config,
-            bloom_filter_arrays,
-            _marker: PhantomData,
+            array_lookup_chip,
+            byte_selector_chip,
+            bit_selector_chip,
+            and_bits_chip,
         }
     }
 
     /// Loads all lookup tables.
     /// Should be called once before [`BloomFilterInstructions::bloom_lookup`]!
     pub fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
-        let mut array_lookup_chip = ArrayLookupChip::construct(
-            self.config.array_lookup_config.clone(),
-            &self.bloom_filter_arrays,
-        );
-        array_lookup_chip.load(layouter)?;
+        self.array_lookup_chip.load(layouter)?;
 
         // The byte selector reuses the bytes table of the bit selector,
         // so nothing else to be loaded here.
-        let mut bit_selector_chip =
-            BitSelectorChip::<F>::construct(self.config.bit_selector_config.clone());
-        bit_selector_chip.load(layouter)?;
+        self.bit_selector_chip.load(layouter)?;
 
         Ok(())
     }
@@ -167,30 +168,24 @@ impl<F: PrimeFieldBits> BloomFilterInstructions<F> for BloomFilterChip<F> {
         hash_value: AssignedCell<F, F>,
         bloom_index: F,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let array_lookup_chip = ArrayLookupChip::construct(
-            self.config.array_lookup_config.clone(),
-            &self.bloom_filter_arrays,
-        );
-        let byte_selector_chip =
-            ByteSelectorChip::<F>::construct(self.config.byte_selector_config.clone());
-        let bit_selector_chip =
-            BitSelectorChip::<F>::construct(self.config.bit_selector_config.clone());
-        let and_bits_chip = AndBitsChip::<F>::construct(self.config.and_bits_config.clone());
-
-        let lookup_results = array_lookup_chip.array_lookup(layouter, hash_value, bloom_index)?;
+        let lookup_results =
+            self.array_lookup_chip
+                .array_lookup(layouter, hash_value, bloom_index)?;
 
         let mut bits = vec![];
         for lookup_result in lookup_results {
-            let byte = byte_selector_chip.select_byte(
+            let byte = self.byte_selector_chip.select_byte(
                 layouter,
                 lookup_result.word,
                 lookup_result.byte_index,
-                array_lookup_chip.bytes_per_word(),
+                self.array_lookup_chip.bytes_per_word(),
             )?;
-            let bit = bit_selector_chip.select_bit(layouter, byte, lookup_result.bit_index)?;
+            let bit = self
+                .bit_selector_chip
+                .select_bit(layouter, byte, lookup_result.bit_index)?;
             bits.push(bit);
         }
-        let result = and_bits_chip.and_bits(layouter, bits)?;
+        let result = self.and_bits_chip.and_bits(layouter, bits)?;
 
         Ok(result)
     }
@@ -290,7 +285,7 @@ mod tests {
 
             let mut bloom_filter_chip = BloomFilterChip::construct(
                 config.bloom_filter_chip_config,
-                self.bloom_filter_arrays.clone(),
+                &self.bloom_filter_arrays,
             );
             bloom_filter_chip.load(&mut layouter)?;
 
