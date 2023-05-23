@@ -1,5 +1,6 @@
 pub mod bloom_filter;
+mod greater_than;
 pub mod hash;
-pub mod response_accumulator;
 mod range_check;
+pub mod response_accumulator;
 pub mod wnn;
