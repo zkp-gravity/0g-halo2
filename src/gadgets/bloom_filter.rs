@@ -15,7 +15,7 @@ use halo2_proofs::{
     circuit::{AssignedCell, Layouter},
     plonk::{Advice, Column, ConstraintSystem, Error, TableColumn},
 };
-use ndarray::Array2;
+use ndarray::Array3;
 
 pub use self::{
     and_bits::{AndBitsChip, AndBitsChipConfig, AndBitsInstruction},
@@ -87,9 +87,16 @@ pub struct BloomFilterChip<F: PrimeFieldBits> {
 
 impl<F: PrimeFieldBits> BloomFilterChip<F> {
     /// Constructs a new bloom filter chip.
-    pub fn construct(config: BloomFilterChipConfig, bloom_filter_arrays: Array2<bool>) -> Self {
-        let array_lookup_chip =
-            ArrayLookupChip::construct(config.array_lookup_config.clone(), &bloom_filter_arrays);
+    pub fn construct(config: BloomFilterChipConfig, bloom_filter_arrays: Array3<bool>) -> Self {
+        // Flatten array: from shape (C, N, B) to (C * N, B)
+        let shape = bloom_filter_arrays.shape();
+        let new_shape = (shape[0] * shape[1], shape[2]);
+        let bloom_filter_arrays_flat = bloom_filter_arrays.into_shape(new_shape).unwrap();
+
+        let array_lookup_chip = ArrayLookupChip::construct(
+            config.array_lookup_config.clone(),
+            &bloom_filter_arrays_flat,
+        );
         let byte_selector_chip =
             ByteSelectorChip::<F>::construct(config.byte_selector_config.clone());
         let bit_selector_chip = BitSelectorChip::<F>::construct(config.bit_selector_config.clone());
@@ -202,7 +209,7 @@ mod tests {
         halo2curves::bn256::Fr as Fp,
         plonk::{Advice, Circuit, Column, Instance},
     };
-    use ndarray::Array2;
+    use ndarray::Array3;
 
     use super::{
         BloomFilterChip, BloomFilterChipConfig, BloomFilterConfig, BloomFilterInstructions,
@@ -212,7 +219,7 @@ mod tests {
     struct MyCircuit<F: PrimeFieldBits> {
         input: u64,
         bloom_index: u64,
-        bloom_filter_arrays: Array2<bool>,
+        bloom_filter_arrays: Array3<bool>,
         _marker: PhantomData<F>,
     }
 
@@ -303,7 +310,7 @@ mod tests {
     #[test]
     fn test_all_positive() {
         let k = 14;
-        let bloom_filter_arrays = Array2::<u8>::ones((1, 1024)).mapv(|_| true);
+        let bloom_filter_arrays = Array3::<u8>::ones((1, 1, 1024)).mapv(|_| true);
         let circuit = MyCircuit::<Fp> {
             input: 8,
             bloom_index: 0,
@@ -318,7 +325,7 @@ mod tests {
     #[test]
     fn test_all_negative() {
         let k = 14;
-        let bloom_filter_arrays = Array2::<u8>::ones((1, 1024)).mapv(|_| false);
+        let bloom_filter_arrays = Array3::<u8>::ones((1, 1, 1024)).mapv(|_| false);
         let circuit = MyCircuit::<Fp> {
             input: 8,
             bloom_index: 0,
@@ -333,9 +340,9 @@ mod tests {
     #[test]
     fn test_index_1_2_positive() {
         let k = 14;
-        let mut bloom_filter_arrays = Array2::<u8>::ones((1, 1024)).mapv(|_| false);
-        bloom_filter_arrays[[0, 1]] = true;
-        bloom_filter_arrays[[0, 2]] = true;
+        let mut bloom_filter_arrays = Array3::<u8>::ones((1, 1, 1024)).mapv(|_| false);
+        bloom_filter_arrays[[0, 0, 1]] = true;
+        bloom_filter_arrays[[0, 0, 2]] = true;
         let circuit = MyCircuit::<Fp> {
             input: 0b0000000001_0000000010,
             bloom_index: 0,
@@ -350,9 +357,9 @@ mod tests {
     #[test]
     fn test_index_1_2_negative() {
         let k = 14;
-        let mut bloom_filter_arrays = Array2::<u8>::ones((1, 1024)).mapv(|_| false);
-        bloom_filter_arrays[[0, 0]] = true;
-        bloom_filter_arrays[[0, 2]] = true;
+        let mut bloom_filter_arrays = Array3::<u8>::ones((1, 1, 1024)).mapv(|_| false);
+        bloom_filter_arrays[[0, 0, 0]] = true;
+        bloom_filter_arrays[[0, 0, 2]] = true;
         let circuit = MyCircuit::<Fp> {
             input: 0b0000000001_0000000010,
             bloom_index: 0,
@@ -374,7 +381,7 @@ mod tests {
             .titled("Bloom filter Layout", ("sans-serif", 60))
             .unwrap();
 
-        let bloom_filter_arrays = Array2::<u8>::ones((1, 1024)).mapv(|_| true);
+        let bloom_filter_arrays = Array3::<u8>::ones((1, 1, 1024)).mapv(|_| true);
         let circuit = MyCircuit::<Fp> {
             input: 2,
             bloom_index: 0,
