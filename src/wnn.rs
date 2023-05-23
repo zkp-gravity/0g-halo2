@@ -89,19 +89,21 @@ impl Wnn {
         ((&x * &x * &x) % self.p) % modulus
     }
 
-    fn compute_hash_inputs(&self, input_bits: Vec<bool>) -> Vec<u64> {
+    fn compute_permuted_inputs(&self, input_bits: Vec<bool>) -> Vec<bool> {
         assert_eq!(input_bits.len(), self.input_permutation.shape()[0]);
 
         // Permute inputs
-        let inputs_permuted: Vec<bool> = self
-            .input_permutation
+        self.input_permutation
             .iter()
             .map(|i| input_bits[*i as usize])
-            .collect();
+            .collect()
+    }
+
+    fn pack_hash_inputs(&self, permuted_inputs: Vec<bool>) -> Vec<u64> {
 
         // Pack inputs into integers of `num_filter_inputs` bits
         // (LITTLE endian order)
-        inputs_permuted
+        permuted_inputs
             .chunks_exact(self.num_filter_inputs)
             .map(|chunk| {
                 chunk
@@ -114,7 +116,8 @@ impl Wnn {
 
     pub fn predict(&self, image: &Array2<u8>) -> Vec<u32> {
         let input_bits = self.encode_image(image);
-        let hash_inputs = self.compute_hash_inputs(input_bits);
+        let permuted_inputs = self.compute_permuted_inputs(input_bits);
+        let hash_inputs = self.pack_hash_inputs(permuted_inputs);
         // This asserts that the number of filter inputs does not exceed the number of bits in a u64
         assert_eq!(hash_inputs.len(), self.bloom_filters.shape()[1]);
 
@@ -158,7 +161,7 @@ impl Wnn {
             .collect::<Vec<_>>()
     }
 
-    fn get_circuit(&self, hash_inputs: Vec<u64>) -> WnnCircuit<Fp> {
+    fn get_circuit(&self, hash_inputs: Vec<bool>) -> WnnCircuit<Fp> {
         let params = WnnCircuitParams {
             p: self.p,
             l: self.num_filter_hashes * (self.num_filter_entries as f32).log2() as usize,
@@ -171,14 +174,14 @@ impl Wnn {
 
     pub fn mock_proof(&self, image: &Array2<u8>, k: u32) {
         let input_bits = self.encode_image(image);
-        let hash_inputs = self.compute_hash_inputs(input_bits.clone());
+        let permuted_inputs = self.compute_permuted_inputs(input_bits.clone());
         let outputs: Vec<Fp> = self
             .predict(image)
             .iter()
             .map(|o| Fp::from(*o as u64))
             .collect();
 
-        let circuit = self.get_circuit(hash_inputs);
+        let circuit = self.get_circuit(permuted_inputs);
 
         let prover = MockProver::run(k, &circuit, vec![outputs.clone()]).unwrap();
         prover.assert_satisfied();
@@ -193,7 +196,7 @@ impl Wnn {
     pub fn generate_proving_key(&self, kzg_params: &ParamsKZG<Bn256>) -> ProvingKey<G1Affine> {
         // They keys should not depend on the input, so we're generating a dummy input here
         let dummy_bits = (0..self.input_permutation.len()).map(|_| false).collect();
-        let dummy_inputs = self.compute_hash_inputs(dummy_bits);
+        let dummy_inputs = self.compute_permuted_inputs(dummy_bits);
 
         let circuit = self.get_circuit(dummy_inputs);
 
@@ -211,14 +214,14 @@ impl Wnn {
         image: &Array2<u8>,
     ) -> (Vec<u8>, Vec<Fp>) {
         let input_bits = self.encode_image(image);
-        let hash_inputs = self.compute_hash_inputs(input_bits.clone());
+        let permuted_inputs = self.compute_permuted_inputs(input_bits.clone());
         let outputs: Vec<Fp> = self
             .predict(image)
             .iter()
             .map(|o| Fp::from(*o as u64))
             .collect();
 
-        let circuit = self.get_circuit(hash_inputs);
+        let circuit = self.get_circuit(permuted_inputs);
 
         let mut transcript: Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>> =
             Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);

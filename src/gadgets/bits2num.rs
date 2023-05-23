@@ -5,7 +5,7 @@ use halo2_proofs::plonk::{Advice, Column, Constraints, ConstraintSystem, Error, 
 use halo2_proofs::poly::Rotation;
 
 
-trait Bits2NumInstruction<F: Field> {
+pub(crate) trait Bits2NumInstruction<F: Field> {
 
     /// Convert the bits in little endian order to a number
     fn convert_be(&self, layouter: &mut impl Layouter<F>, bits: Vec<AssignedCell<F, F>>) -> Result<AssignedCell<F, F>, Error>;
@@ -16,21 +16,21 @@ trait Bits2NumInstruction<F: Field> {
 }
 
 #[derive(Debug, Clone)]
-struct Bits2NumConfig {
+pub(crate) struct Bits2NumConfig {
     /// How many bits are to be converted into a single number
     /// Max values is log(|F|)
     pub(crate) num_bit_size: usize
 }
 
 #[derive(Debug, Clone)]
-struct Bits2NumChipConfig {
+pub(crate) struct Bits2NumChipConfig {
     pub(crate) selector: Selector,
     pub(crate) input: Column<Advice>,
     pub(crate) output: Column<Advice>,
     pub(crate) bit2num_config: Bits2NumConfig
 }
 
-struct Bits2NumChip<F: Field> {
+pub(crate) struct Bits2NumChip<F: Field> {
     config: Bits2NumChipConfig,
     _marker: PhantomData<F>,
 }
@@ -98,7 +98,7 @@ impl <F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
                     self.config.output,
                     i + 1,
                     || num_val,
-                )?;
+                )?; // TODO - understand why this fails with SynthesisError
 
                 let input_i = region.assign_advice(
                     || format!("input bit {}", i),
