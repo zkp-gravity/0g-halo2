@@ -62,10 +62,15 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         let n_classes = bloom_filter_arrays.shape()[0];
         let n_inputs = bloom_filter_arrays.shape()[1];
 
+        // Flatten array: from shape (C, N, B) to (C * N, B)
+        let shape = bloom_filter_arrays.shape();
+        let new_shape = (shape[0] * shape[1], shape[2]);
+        let bloom_filter_arrays_flat = bloom_filter_arrays.into_shape(new_shape).unwrap();
+
         let hash_chip = HashChip::construct(config.hash_chip_config.clone());
         let bloom_filter_chip = BloomFilterChip::construct(
             config.bloom_filter_chip_config.clone(),
-            bloom_filter_arrays,
+            &bloom_filter_arrays_flat,
         );
         let response_accumulator_chip =
             ResponseAccumulatorChip::construct(config.response_accumulator_chip_config.clone());
