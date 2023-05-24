@@ -26,7 +26,6 @@ pub trait WnnInstructions<F: PrimeFieldBits> {
     fn predict(
         &self,
         layouter: impl Layouter<F>,
-        bloom_filter_arrays: Array3<bool>,
         inputs: Vec<bool>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 }
@@ -54,15 +53,48 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
 ///    (for each input and each class).
 /// 3. The [`ResponseAccumulatorChip`] is used to accumulate the responses.
 struct WnnChip<F: PrimeFieldBits> {
+    bits2num_chip: Bits2NumChip<F>,
+    hash_chip: HashChip<F>,
+    bloom_filter_chip: BloomFilterChip<F>,
+    response_accumulator_chip: ResponseAccumulatorChip<F>,
+
     config: WnnChipConfig<F>,
-    _marker: PhantomData<F>,
+
+    n_classes: usize,
+    n_inputs: usize,
 }
 
 impl<F: PrimeFieldBits> WnnChip<F> {
-    fn construct(config: WnnChipConfig<F>) -> Self {
+    fn construct(config: WnnChipConfig<F>, bloom_filter_arrays: Array3<bool>) -> Self {
+        let shape = bloom_filter_arrays.shape();
+        let n_classes = shape[0];
+        let n_inputs = shape[1];
+        let n_filters = shape[2];
+
+        // Flatten array: from shape (C, N, B) to (C * N, B)
+        let bloom_filter_arrays_flat = bloom_filter_arrays
+            .into_shape((n_classes * n_inputs, n_filters))
+            .unwrap();
+
+        let bits2num_chip = Bits2NumChip::construct(config.bit2num_chip_config.clone());
+        let hash_chip = HashChip::construct(config.hash_chip_config.clone());
+        let bloom_filter_chip = BloomFilterChip::construct(
+            config.bloom_filter_chip_config.clone(),
+            &bloom_filter_arrays_flat,
+        );
+        let response_accumulator_chip =
+            ResponseAccumulatorChip::construct(config.response_accumulator_chip_config.clone());
+
         WnnChip {
+            bits2num_chip,
+            hash_chip,
+            bloom_filter_chip,
+            response_accumulator_chip,
+
             config,
-            _marker: PhantomData,
+
+            n_classes,
+            n_inputs,
         }
     }
 
@@ -95,19 +127,20 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         let response_accumulator_chip_config =
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
 
-        let bit2num_chip_config = Bits2NumChip::configure(
-            meta,
-            advice_columns[1],
-            advice_columns[5],
-        );
+        let bit2num_chip_config =
+            Bits2NumChip::configure(meta, advice_columns[1], advice_columns[5]);
 
         WnnChipConfig {
             hash_chip_config,
             bloom_filter_chip_config,
             response_accumulator_chip_config,
             bit2num_chip_config,
-            input: advice_columns[0]
+            input: advice_columns[0],
         }
+    }
+
+    pub fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        self.bloom_filter_chip.load(layouter)
     }
 }
 
@@ -115,33 +148,8 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
     fn predict(
         &self,
         mut layouter: impl Layouter<F>,
-        bloom_filter_arrays: Array3<bool>,
         inputs: Vec<bool>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        assert_eq!(
-            self.config.hash_chip_config.hash_function_config.n_bits
-                * bloom_filter_arrays.shape()[1],
-            inputs.len()
-        );
-
-        // Flatten array: from shape (C, N, B) to (C * N, B)
-        let shape = bloom_filter_arrays.shape();
-        let bloom_filter_arrays_flat = bloom_filter_arrays
-            .clone()
-            .into_shape((shape[0] * shape[1], shape[2]))
-            .unwrap();
-
-        let bit2num_chip = Bits2NumChip::<F>::construct(self.config.bit2num_chip_config.clone());
-
-        let hash_chip = HashChip::construct(self.config.hash_chip_config.clone());
-        let mut bloom_filter_chip = BloomFilterChip::<F>::construct(
-            self.config.bloom_filter_chip_config.clone(),
-            bloom_filter_arrays_flat,
-        );
-        let response_accumulator_chip = ResponseAccumulatorChip::<F>::construct(
-            self.config.response_accumulator_chip_config.clone(),
-        );
-
         // Assign the inputs to the first column of the hash chip
 
         let permuted_inputs = layouter.assign_region(
@@ -167,25 +175,30 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
         // Convert the input bits to a group of field element that can be hashed
         let joint_inputs = permuted_inputs
             .chunks_exact(num_bit_size)
-            .map(|chunk| bit2num_chip.convert_le(&mut layouter, Vec::from(chunk)))
+            .map(|chunk| {
+                self.bits2num_chip
+                    .convert_le(&mut layouter, Vec::from(chunk))
+            })
             .collect::<Result<Vec<_>, _>>()?;
+
+        assert_eq!(self.n_inputs, joint_inputs.len());
 
         let hashes = joint_inputs
             .into_iter()
-            .map(|hash_input| hash_chip.hash(layouter.namespace(|| "hash"), hash_input))
+            .map(|hash_input| {
+                self.hash_chip
+                    .hash(layouter.namespace(|| "hash"), hash_input)
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let n_classes = bloom_filter_arrays.shape()[0];
-        bloom_filter_chip.load(&mut layouter)?;
-
         let mut responses = vec![];
-        for c in 0..n_classes {
+        for c in 0..self.n_classes {
             responses.push(Vec::new());
-            for (i, hash) in hashes.clone().iter().enumerate() {
+            for (i, hash) in hashes.clone().into_iter().enumerate() {
                 let array_index = c * hashes.len() + i;
-                responses[c].push(bloom_filter_chip.bloom_lookup(
+                responses[c].push(self.bloom_filter_chip.bloom_lookup(
                     &mut layouter,
-                    hash.clone(),
+                    hash,
                     F::from(array_index as u64),
                 )?);
             }
@@ -194,7 +207,8 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
         responses
             .iter()
             .map(|class_responses| {
-                response_accumulator_chip.accumulate_responses(&mut layouter, class_responses)
+                self.response_accumulator_chip
+                    .accumulate_responses(&mut layouter, class_responses)
             })
             .collect::<Result<Vec<_>, _>>()
     }
@@ -317,13 +331,11 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let wnn_chip = WnnChip::construct(config.wnn_chip_config);
+        let mut wnn_chip =
+            WnnChip::construct(config.wnn_chip_config, self.bloom_filter_arrays.clone());
+        wnn_chip.load(&mut layouter)?;
 
-        let result = wnn_chip.predict(
-            layouter.namespace(|| "wnn"),
-            self.bloom_filter_arrays.clone(),
-            self.inputs.clone(),
-        )?;
+        let result = wnn_chip.predict(layouter.namespace(|| "wnn"), self.inputs.clone())?;
 
         for i in 0..result.len() {
             layouter.constrain_instance(result[i].cell(), config.instance_column, i)?;
