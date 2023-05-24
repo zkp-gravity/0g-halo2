@@ -11,7 +11,11 @@ use crate::utils::integer_division;
 use super::range_check::RangeCheckConfig;
 
 pub trait HashInstructions<F: PrimeFieldBits> {
-    fn hash(&self, layouter: impl Layouter<F>, input: AssignedCell<F, F>) -> Result<AssignedCell<F, F>, Error>;
+    fn hash(
+        &self,
+        layouter: impl Layouter<F>,
+        input: AssignedCell<F, F>,
+    ) -> Result<AssignedCell<F, F>, Error>;
 }
 
 #[derive(Debug, Clone)]
@@ -141,12 +145,8 @@ impl<F: PrimeFieldBits> HashChip<F> {
             |mut region| {
                 self.config.selector.enable(&mut region, 0)?;
 
-                let input_cell = region.assign_advice(
-                    || "input",
-                    self.config.input,
-                    0,
-                    || input.value().cloned(),
-                )?;
+                let input_cell =
+                    input.copy_advice(|| "input", &mut region, self.config.input, 0)?;
                 let input = input_cell.value_field().evaluate();
                 let input_cubed = input * input * input;
                 let quotient = input_cubed.and_then(|input_cubed| {
@@ -172,7 +172,11 @@ impl<F: PrimeFieldBits> HashChip<F> {
 }
 
 impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
-    fn hash(&self, mut layouter: impl Layouter<F>, input: AssignedCell<F, F>) -> Result<AssignedCell<F, F>, Error> {
+    fn hash(
+        &self,
+        mut layouter: impl Layouter<F>,
+        input: AssignedCell<F, F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
         let (input, quotient, remainder, msb, output) =
             self.compute_hash(layouter.namespace(|| "hash"), input)?;
 
@@ -213,13 +217,13 @@ mod tests {
     use std::marker::PhantomData;
 
     use ff::PrimeFieldBits;
+    use halo2_proofs::circuit::Value;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
         dev::MockProver,
         halo2curves::bn256::Fr as Fp,
         plonk::{Circuit, Column, Instance, TableColumn},
     };
-    use halo2_proofs::circuit::Value;
 
     use crate::gadgets::range_check::RangeCheckConfig;
 
@@ -296,18 +300,17 @@ mod tests {
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
         ) -> Result<(), halo2_proofs::plonk::Error> {
-            let assigned_input =
-                layouter.assign_region(
-                    || "input",
-                    |mut region|
-                        region.assign_advice(
-                            || "input",
-                            config.hash_config.input,
-                            0,
-                            || Value::known(F::from(self.input))
-                        )
-                )?;
-
+            let assigned_input = layouter.assign_region(
+                || "input",
+                |mut region| {
+                    region.assign_advice(
+                        || "input",
+                        config.hash_config.input,
+                        0,
+                        || Value::known(F::from(self.input)),
+                    )
+                },
+            )?;
 
             RangeCheckConfig::<F>::load_bytes_column(&mut layouter, config.table_column)?;
             let hash_chip = HashChip::construct(config.hash_config);

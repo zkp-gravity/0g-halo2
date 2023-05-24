@@ -100,7 +100,6 @@ impl Wnn {
     }
 
     fn pack_hash_inputs(&self, permuted_inputs: Vec<bool>) -> Vec<u64> {
-
         // Pack inputs into integers of `num_filter_inputs` bits
         // (LITTLE endian order)
         permuted_inputs
