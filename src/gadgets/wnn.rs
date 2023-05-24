@@ -144,7 +144,7 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
         );
 
         // Assign the inputs to the first column of the hash chip
-        
+
         let permuted_inputs = layouter.assign_region(
             || "permuted inputs",
             |mut region| {

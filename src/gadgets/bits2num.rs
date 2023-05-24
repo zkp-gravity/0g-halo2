@@ -99,34 +99,31 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
 
                 let mut num_val = Value::known(F::from(0));
 
-                let mut num_val_cell = region
-                    .assign_advice_from_constant(
-                        || format!("prev_num_val {}", 0),
-                        self.config.output,
-                        0,
-                        F::ZERO,
-                    )?;
+                let mut num_val_cell = region.assign_advice_from_constant(
+                    || format!("prev_num_val {}", 0),
+                    self.config.output,
+                    0,
+                    F::ZERO,
+                )?;
 
                 for i in 0..self.config.bit2num_config.num_bit_size {
                     self.config.selector.enable(&mut region, i).unwrap();
 
                     num_val = num_val * Value::known(F::from(2)) + bits[i].value();
 
-                    num_val_cell = region
-                        .assign_advice(
-                            || format!("num_val {}", i + 1),
-                            self.config.output,
-                            i + 1,
-                            || num_val,
-                        )?;
+                    num_val_cell = region.assign_advice(
+                        || format!("num_val {}", i + 1),
+                        self.config.output,
+                        i + 1,
+                        || num_val,
+                    )?;
 
-                    bits[i]
-                        .copy_advice(
-                            || format!("input bit {}", i),
-                            &mut region,
-                            self.config.input,
-                            i,
-                        )?;
+                    bits[i].copy_advice(
+                        || format!("input bit {}", i),
+                        &mut region,
+                        self.config.input,
+                        i,
+                    )?;
                 }
 
                 Ok(num_val_cell)
