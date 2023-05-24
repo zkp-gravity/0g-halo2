@@ -5,14 +5,15 @@ use halo2_proofs::poly::Rotation;
 use std::marker::PhantomData;
 
 pub(crate) trait Bits2NumInstruction<F: Field> {
-    /// Convert the bits in little endian order to a number
+
+    /// Convert the bits in big endian order to a number
     fn convert_be(
         &self,
         layouter: &mut impl Layouter<F>,
         bits: Vec<AssignedCell<F, F>>,
     ) -> Result<AssignedCell<F, F>, Error>;
 
-    /// Convert the bits in big endian order to a number
+    /// Convert the bits in little endian order to a number
     fn convert_le(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -20,19 +21,12 @@ pub(crate) trait Bits2NumInstruction<F: Field> {
     ) -> Result<AssignedCell<F, F>, Error>;
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct Bits2NumConfig {
-    /// How many bits are to be converted into a single number
-    /// Max values is log(|F|)
-    pub(crate) num_bit_size: usize,
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct Bits2NumChipConfig {
     pub(crate) selector: Selector,
     pub(crate) input: Column<Advice>,
     pub(crate) output: Column<Advice>,
-    pub(crate) bit2num_config: Bits2NumConfig,
 }
 
 pub(crate) struct Bits2NumChip<F: Field> {
@@ -52,7 +46,6 @@ impl<F: PrimeField> Bits2NumChip<F> {
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
         output: Column<Advice>,
-        bit2num_config: Bits2NumConfig,
     ) -> Bits2NumChipConfig {
         let selector = meta.selector();
 
@@ -73,7 +66,6 @@ impl<F: PrimeField> Bits2NumChip<F> {
             selector,
             input,
             output,
-            bit2num_config,
         }
     }
 }
@@ -87,14 +79,11 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
         let res = layouter.assign_region(
             || "bits2num",
             |mut region| {
-                assert_eq!(
-                    bits.len(),
-                    self.config.bit2num_config.num_bit_size,
-                    "Incorrect amount of bits provided!"
-                );
+
+                let num_bit_size = bits.len();
                 assert!(
-                    self.config.bit2num_config.num_bit_size <= F::CAPACITY as usize,
-                    "Number of bits is too large!"
+                    num_bit_size as u32 <= F::CAPACITY,
+                    "Number of bits is too large for field size!"
                 );
 
                 let mut num_val = Value::known(F::from(0));
@@ -106,7 +95,7 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
                     F::ZERO,
                 )?;
 
-                for i in 0..self.config.bit2num_config.num_bit_size {
+                for i in 0..num_bit_size {
                     self.config.selector.enable(&mut region, i).unwrap();
 
                     num_val = num_val * Value::known(F::from(2)) + bits[i].value();
@@ -148,7 +137,7 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
 #[cfg(test)]
 mod test {
     use crate::gadgets::bits2num::{
-        Bits2NumChip, Bits2NumChipConfig, Bits2NumConfig, Bits2NumInstruction,
+        Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction,
     };
     use ff::PrimeField;
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner, Value};
@@ -176,7 +165,7 @@ mod test {
     impl<F: PrimeField> Circuit<F> for Bits2NumTestCircuit {
         type Config = Bits2NumCircuitConfig;
         type FloorPlanner = SimpleFloorPlanner;
-        type Params = usize;
+        type Params = ();
 
         fn without_witnesses(&self) -> Self {
             Self {
@@ -186,24 +175,11 @@ mod test {
             }
         }
 
-        fn params(&self) -> Self::Params {
-            self.params
-        }
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
 
-        fn configure(_meta: &mut ConstraintSystem<F>) -> Self::Config {
-            unimplemented!("configure_with_params should be used!")
-        }
-
-        fn configure_with_params(
-            meta: &mut ConstraintSystem<F>,
-            _params: Self::Params,
-        ) -> Self::Config {
             let input = meta.advice_column();
             let output = meta.advice_column();
             let constants = meta.fixed_column();
-            let bit2num_config = Bits2NumConfig {
-                num_bit_size: _params,
-            };
             let pub_input = meta.instance_column();
 
             meta.enable_equality(pub_input);
@@ -212,7 +188,7 @@ mod test {
             meta.enable_constant(constants);
 
             Bits2NumCircuitConfig {
-                bits2num_chip_conf: Bits2NumChip::configure(meta, input, output, bit2num_config),
+                bits2num_chip_conf: Bits2NumChip::configure(meta, input, output),
                 pub_input,
             }
         }

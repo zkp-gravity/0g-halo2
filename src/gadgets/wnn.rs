@@ -9,7 +9,7 @@ use halo2_proofs::{
 use ndarray::{array, Array3};
 
 use crate::gadgets::{
-    bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumConfig, Bits2NumInstruction},
+    bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
     bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
     bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
     hash::{HashChip, HashConfig, HashInstructions},
@@ -43,6 +43,7 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
     bloom_filter_chip_config: BloomFilterChipConfig,
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
     bit2num_chip_config: Bits2NumChipConfig,
+    input: Column<Advice>,
 }
 
 /// Implements a BTHOWeN- style weightless neural network.
@@ -96,11 +97,8 @@ impl<F: PrimeFieldBits> WnnChip<F> {
 
         let bit2num_chip_config = Bits2NumChip::configure(
             meta,
-            advice_columns[1], // TODO - how do we select the correct column? I just picked the second one
-            advice_columns[5], // TODO - how do we select the correct column? I just picked the last one
-            Bits2NumConfig {
-                num_bit_size: wnn_config.hash_function_config.n_bits,
-            },
+            advice_columns[1],
+            advice_columns[5],
         );
 
         WnnChipConfig {
@@ -108,6 +106,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             bloom_filter_chip_config,
             response_accumulator_chip_config,
             bit2num_chip_config,
+            input: advice_columns[0]
         }
     }
 }
@@ -152,7 +151,7 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
                 for (i, input) in inputs.iter().enumerate() {
                     let input_cell = region.assign_advice(
                         || format!("input {}", i),
-                        self.config.bit2num_chip_config.input,
+                        self.config.input,
                         i,
                         || Value::known(F::from(*input as u64)),
                     )?;
@@ -163,9 +162,11 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
             },
         )?;
 
+        let num_bit_size = self.config.hash_chip_config.hash_function_config.n_bits;
+
         // Convert the input bits to a group of field element that can be hashed
         let joint_inputs = permuted_inputs
-            .chunks_exact(self.config.bit2num_chip_config.bit2num_config.num_bit_size)
+            .chunks_exact(num_bit_size)
             .map(|chunk| bit2num_chip.convert_le(&mut layouter, Vec::from(chunk)))
             .collect::<Result<Vec<_>, _>>()?;
 
