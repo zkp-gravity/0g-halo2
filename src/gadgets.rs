@@ -1,6 +1,7 @@
-pub mod bloom_filter;
+mod bits2num;
+mod bloom_filter;
 mod greater_than;
-pub mod hash;
+mod hash;
 mod range_check;
-pub mod response_accumulator;
+mod response_accumulator;
 pub mod wnn;

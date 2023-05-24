@@ -60,7 +60,7 @@ pub struct ByteSelectorChipConfig {
 ///   - The sum of the byte selectors (computed via the `selector_acc` column) must be 1.
 ///   - When the selector is 1, the `lookup_index` must be equal to the `byte_index`.
 /// - Finally, the `byte_acc` column is used to to propagate the selected byte to the last cell.
-/// 
+///
 /// Note that this implicitly range-checks `lookup_index` to be in `[0, num_bytes)`.
 #[derive(Debug, Clone)]
 pub struct ByteSelectorChip<F: PrimeFieldBits> {
