@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter},
+    circuit::{AssignedCell, Layouter, Region, Value},
     plonk::{
         Advice, Column, ConstraintSystem, Constraints, Error, Expression, Selector, TableColumn,
     },
@@ -13,10 +13,17 @@ use crate::utils::to_u32;
 
 pub trait GreaterThanInstructions<F: PrimeFieldBits> {
     /// Returns `x > y` (1 or 0).
-    fn greater_than(
+    fn greater_than_witness(
         &self,
         layouter: &mut impl Layouter<F>,
-        x: AssignedCell<F, F>,
+        x: F,
+        y: F,
+    ) -> Result<(AssignedCell<F, F>, AssignedCell<F, F>), Error>;
+
+    fn greater_than_copy(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        x: &AssignedCell<F, F>,
         y: F,
     ) -> Result<AssignedCell<F, F>, Error>;
 }
@@ -102,38 +109,62 @@ impl<F: PrimeFieldBits> GreaterThanChip<F> {
             selector,
         }
     }
+
+    fn greater_than(
+        &self,
+        region: &mut Region<F>,
+        x: &AssignedCell<F, F>,
+        y: F,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        if to_u32(&y) > 255 {
+            panic!("y must be less than 256!");
+        }
+
+        let greater_than = x.value().map(|x| F::from((to_u32(x) > to_u32(&y)) as u64));
+        // x + diff = 256 * is_gt + y
+        // -> diff = 256 * is_gt + y - x
+        let diff = x
+            .value()
+            .zip(greater_than)
+            .map(|(x, gt)| F::from(256u64) * gt + y - x);
+
+        self.config.selector.enable(region, 0)?;
+
+        region.assign_advice_from_constant(|| "y", self.config.y, 0, y)?;
+        region.assign_advice(|| "diff", self.config.diff, 0, || diff)?;
+        let result_cell = region.assign_advice(|| "gt", self.config.is_gt, 0, || greater_than)?;
+        Ok(result_cell)
+    }
 }
 
 impl<F: PrimeFieldBits> GreaterThanInstructions<F> for GreaterThanChip<F> {
-    fn greater_than(
+    fn greater_than_witness(
         &self,
         layouter: &mut impl Layouter<F>,
-        x: AssignedCell<F, F>,
+        x: F,
+        y: F,
+    ) -> Result<(AssignedCell<F, F>, AssignedCell<F, F>), Error> {
+        layouter.assign_region(
+            || "greater_than_witness",
+            |mut region| {
+                let x_cell = region.assign_advice(|| "x", self.config.x, 0, || Value::known(x))?;
+                let result_cell = self.greater_than(&mut region, &x_cell, y)?;
+                Ok((x_cell, result_cell))
+            },
+        )
+    }
+
+    fn greater_than_copy(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        x: &AssignedCell<F, F>,
         y: F,
     ) -> Result<AssignedCell<F, F>, Error> {
         layouter.assign_region(
-            || "greater_than",
+            || "greater_than_copy",
             |mut region| {
-                let greater_than = x.value().map(|x| {
-                    if to_u32(x) > to_u32(&y) {
-                        F::ONE
-                    } else {
-                        F::ZERO
-                    }
-                });
-                // x + diff = 256 * is_gt + y
-                // -> diff = 256 * is_gt + y - x
-                let diff = x
-                    .value()
-                    .zip(greater_than)
-                    .map(|(x, gt)| F::from(256u64) * gt + y - *x);
-
-                self.config.selector.enable(&mut region, 0)?;
-
-                x.copy_advice(|| "x", &mut region, self.config.x, 0)?;
-                region.assign_advice_from_constant(|| "y", self.config.y, 0, y)?;
-                region.assign_advice(|| "diff", self.config.diff, 0, || diff)?;
-                region.assign_advice(|| "gt", self.config.is_gt, 0, || greater_than)
+                let x_cell = x.copy_advice(|| "x", &mut region, self.config.x, 0)?;
+                self.greater_than(&mut region, &x_cell, y)
             },
         )
     }
@@ -145,10 +176,10 @@ mod tests {
 
     use ff::{Field, PrimeFieldBits};
     use halo2_proofs::{
-        circuit::{Layouter, SimpleFloorPlanner, Value},
+        circuit::{Layouter, SimpleFloorPlanner},
         dev::MockProver,
         halo2curves::bn256::Fr as Fp,
-        plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, TableColumn},
+        plonk::{Circuit, Column, ConstraintSystem, Error, Instance, TableColumn},
     };
 
     use crate::gadgets::range_check::RangeCheckConfig;
@@ -166,7 +197,6 @@ mod tests {
     #[derive(Clone, Debug)]
     struct Config {
         greater_than_config: GreaterThanChipConfig,
-        advice_column: Column<Advice>,
         table_column: TableColumn,
         instance: Column<Instance>,
     }
@@ -201,7 +231,6 @@ mod tests {
 
             Config {
                 greater_than_config: range_check_config,
-                advice_column: x,
                 table_column,
                 instance,
             }
@@ -212,20 +241,13 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            let x_cell = layouter.assign_region(
-                || "x",
-                |mut region| {
-                    region.assign_advice(
-                        || "x",
-                        config.advice_column,
-                        0,
-                        || Value::known(F::from(self.x)),
-                    )
-                },
-            )?;
             RangeCheckConfig::load_bytes_column(&mut layouter, config.table_column)?;
             let greater_than_chip = GreaterThanChip::construct(config.greater_than_config);
-            let result = greater_than_chip.greater_than(&mut layouter, x_cell, F::from(self.y))?;
+            let (_, result) = greater_than_chip.greater_than_witness(
+                &mut layouter,
+                F::from(self.x),
+                F::from(self.y),
+            )?;
 
             layouter.constrain_instance(result.cell(), config.instance, 0)?;
             Ok(())

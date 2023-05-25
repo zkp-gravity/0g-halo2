@@ -29,8 +29,20 @@ pub fn load_wnn(path: &Path) -> Result<Wnn> {
     let expected_shape = [width, width, bits_per_input];
     let binarization_thresholds = file.dataset("binarization_thresholds")?;
     let binarization_thresholds = binarization_thresholds.read::<f32, Ix3>()?;
-    let binarization_thresholds = binarization_thresholds * 255.0;
     assert_eq!(binarization_thresholds.shape(), expected_shape);
+
+    // Quantize binarization thresholds.
+    // This should make no difference to the accuracy of the model,
+    // because images are quantized to u8 anyway.
+    // Note that:
+    // - We use ceil(), because <u8> >= <f32> <==> <u8> >= <f32>.ceil() as u8
+    // - We clamp at 0, because intensities cannot be negative
+    // - We clamp at **256**, because intensities cannot be greater than 255
+    //   Note that thresholds set to 256 will never be reached!
+    //   Also note that for this reason, we can't use u8 to store the thresholds.
+    let binarization_thresholds = binarization_thresholds * 255.0;
+    let binarization_thresholds =
+        binarization_thresholds.map(|x| x.ceil().max(0.0).min(256.0) as u16);
 
     let input_order = file.dataset("input_order")?;
     let input_order = input_order.read::<u64, Ix1>()?;
@@ -47,4 +59,14 @@ pub fn load_wnn(path: &Path) -> Result<Wnn> {
         input_order,
         binarization_thresholds,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+
+    #[test]
+    fn test_ceil() {
+        assert_eq!(0.5f32.ceil() as u8, 1);
+        assert_eq!(-0.9f32.ceil() as u8, 0);
+    }
 }
