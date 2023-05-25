@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, marker::PhantomData};
+use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
 use halo2_proofs::{
@@ -8,21 +8,19 @@ use halo2_proofs::{
 use ndarray::{array, Array1, Array2, Array3};
 
 use crate::gadgets::{
+    bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
+    bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
+    bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
+    hash::{HashChip, HashConfig, HashInstructions},
+    range_check::RangeCheckConfig,
+    response_accumulator::ResponseAccumulatorInstructions,
+};
+use crate::gadgets::{
     hash::HashFunctionConfig,
     response_accumulator::{ResponseAccumulatorChip, ResponseAccumulatorChipConfig},
 };
-use crate::{
-    gadgets::{
-        bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
-        bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
-        bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
-        hash::{HashChip, HashConfig, HashInstructions},
-        range_check::RangeCheckConfig,
-        response_accumulator::ResponseAccumulatorInstructions,
-    },
-};
 
-use super::greater_than::{GreaterThanChip, GreaterThanChipConfig, GreaterThanInstructions};
+use super::encode_image::{EncodeImageChip, EncodeImageChipConfig, EncodeImageInstructions};
 
 pub trait WnnInstructions<F: PrimeFieldBits> {
     /// Given an input vector, predicts the score for each class.
@@ -41,12 +39,11 @@ struct WnnConfig {
 
 #[derive(Clone, Debug)]
 pub struct WnnChipConfig<F: PrimeFieldBits> {
-    greater_than_chip_config: GreaterThanChipConfig,
+    encode_image_chip_config: EncodeImageChipConfig,
     hash_chip_config: HashConfig<F>,
     bloom_filter_chip_config: BloomFilterChipConfig,
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
     bit2num_chip_config: Bits2NumChipConfig,
-    input: Column<Advice>,
 }
 
 /// Implements a BTHOWeN- style weightless neural network.
@@ -57,13 +54,12 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
 ///    (for each input and each class).
 /// 3. The [`ResponseAccumulatorChip`] is used to accumulate the responses.
 struct WnnChip<F: PrimeFieldBits> {
-    greater_than_chip: GreaterThanChip<F>,
+    encode_image_chip: EncodeImageChip<F>,
     bits2num_chip: Bits2NumChip<F>,
     hash_chip: HashChip<F>,
     bloom_filter_chip: BloomFilterChip<F>,
     response_accumulator_chip: ResponseAccumulatorChip<F>,
 
-    binarization_thresholds: Array3<u16>,
     input_permutation: Array1<u64>,
 
     config: WnnChipConfig<F>,
@@ -89,7 +85,10 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             .into_shape((n_classes * n_inputs, n_filters))
             .unwrap();
 
-        let greater_than_chip = GreaterThanChip::construct(config.greater_than_chip_config.clone());
+        let encode_image_chip = EncodeImageChip::construct(
+            config.encode_image_chip_config.clone(),
+            binarization_thresholds,
+        );
         let bits2num_chip = Bits2NumChip::construct(config.bit2num_chip_config.clone());
         let hash_chip = HashChip::construct(config.hash_chip_config.clone());
         let bloom_filter_chip = BloomFilterChip::construct(
@@ -100,13 +99,12 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             ResponseAccumulatorChip::construct(config.response_accumulator_chip_config.clone());
 
         WnnChip {
-            greater_than_chip,
+            encode_image_chip,
             bits2num_chip,
             hash_chip,
             bloom_filter_chip,
             response_accumulator_chip,
 
-            binarization_thresholds,
             input_permutation,
 
             config,
@@ -126,7 +124,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             advice_columns,
             wnn_config.bloom_filter_config.clone(),
         );
-        let greater_than_chip_config = GreaterThanChip::configure(
+        let encode_image_chip_config = EncodeImageChip::configure(
             meta,
             advice_columns[0],
             advice_columns[1],
@@ -158,12 +156,11 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             Bits2NumChip::configure(meta, advice_columns[4], advice_columns[5]);
 
         WnnChipConfig {
-            greater_than_chip_config,
+            encode_image_chip_config,
             hash_chip_config,
             bloom_filter_chip_config,
             response_accumulator_chip_config,
             bit2num_chip_config,
-            input: advice_columns[0],
         }
     }
 
@@ -178,64 +175,9 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
         mut layouter: impl Layouter<F>,
         image: &Array2<u8>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        let (width, height) = (image.shape()[0], image.shape()[1]);
-
-        let mut intensity_cells: BTreeMap<(usize, usize), AssignedCell<F, F>> = BTreeMap::new();
-        let mut bit_cells = vec![];
-
-        for b in 0..self.binarization_thresholds.shape()[2] {
-            for i in 0..width {
-                for j in 0..height {
-                    let threshold = self.binarization_thresholds[(i, j, b)];
-                    assert!(threshold <= 256);
-
-                    let bit_cell = if threshold == 0 {
-                        // If the threshold is zero, the bit is always one, regardless of the of the intensity.
-                        layouter.assign_region(
-                            || "bit is one",
-                            |mut region| {
-                                region.assign_advice_from_constant(
-                                    || "gt",
-                                    self.config.input,
-                                    0,
-                                    F::ONE,
-                                )
-                            },
-                        )?
-                    } else {
-                        // The result should be true if the intensity is greater or equal than the threshold,
-                        // but the gadget only implements greater than, so we need to subtract 1 from the threshold.
-                        // Because we already handled the threshold == 0 case, this means that `t` is now in the
-                        // range [0, 255], which is required by the greater than gadget.
-                        let t = F::from((self.binarization_thresholds[(i, j, b)] - 1) as u64);
-
-                        match intensity_cells.get(&(i, j)) {
-                            None => {
-                                // For the first cell, we want to remember the intensity cell, so that we can
-                                // add a copy constraint for the other thresholds.
-                                let (intensity_cell, bit_cell) =
-                                    self.greater_than_chip.greater_than_witness(
-                                        &mut layouter,
-                                        F::from(image[(i, j)] as u64),
-                                        t,
-                                    )?;
-                                intensity_cells.insert((i, j), intensity_cell);
-                                bit_cell
-                            }
-                            Some(first_cell) => {
-                                // For the other cells, we want to add a copy constraint to the first cell.
-                                self.greater_than_chip.greater_than_copy(
-                                    &mut layouter,
-                                    first_cell,
-                                    t,
-                                )?
-                            }
-                        }
-                    };
-                    bit_cells.push(bit_cell);
-                }
-            }
-        }
+        let bit_cells = self
+            .encode_image_chip
+            .encode_image(layouter.namespace(|| "encode image"), image)?;
 
         // Permute input bits
         let permuted_inputs = self
