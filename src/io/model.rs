@@ -60,13 +60,3 @@ pub fn load_wnn(path: &Path) -> Result<Wnn> {
         binarization_thresholds,
     ))
 }
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn test_ceil() {
-        assert_eq!(0.5f32.ceil() as u8, 1);
-        assert_eq!(-0.9f32.ceil() as u8, 0);
-    }
-}

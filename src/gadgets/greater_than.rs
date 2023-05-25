@@ -12,7 +12,9 @@ use halo2_proofs::{
 use crate::utils::to_u32;
 
 pub trait GreaterThanInstructions<F: PrimeFieldBits> {
-    /// Returns `x > y` (1 or 0).
+    /// Computes whether `x > y` by witnessing `x` and treating `y` as a constant.
+    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` us a public constant).
+    /// Returns the assigned cell for `x` and the result (0 or 1).
     fn greater_than_witness(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -20,6 +22,9 @@ pub trait GreaterThanInstructions<F: PrimeFieldBits> {
         y: F,
     ) -> Result<(AssignedCell<F, F>, AssignedCell<F, F>), Error>;
 
+    /// Computes whether `x > y` by copying `x` from an existing cell and treating `y` as a constant.
+    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` us a public constant).
+    /// Returns the assigned cell with the result (0 or 1).
     fn greater_than_copy(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -43,6 +48,18 @@ pub struct GreaterThanChip<F: PrimeFieldBits> {
     _marker: PhantomData<F>,
 }
 
+/// Implements greater-than.
+///
+/// The layout is as follows:
+/// | x                   | y            | diff                | is_gt |
+/// |---------------------|--------------|---------------------|-------|
+/// | b (copy or witness) | t (constant) | 256 * is_gt + t - b | b > t |
+///
+/// The following constraints are enforced:
+/// - x is a byte (via a lookup table)
+/// - diff is a byte (via a lookup table)
+/// - is_gt is a bit
+/// - x + diff = 256 * is_gt + y
 impl<F: PrimeFieldBits> GreaterThanChip<F> {
     pub fn construct(config: GreaterThanChipConfig) -> Self {
         Self {
@@ -132,8 +149,7 @@ impl<F: PrimeFieldBits> GreaterThanChip<F> {
 
         region.assign_advice_from_constant(|| "y", self.config.y, 0, y)?;
         region.assign_advice(|| "diff", self.config.diff, 0, || diff)?;
-        let result_cell = region.assign_advice(|| "gt", self.config.is_gt, 0, || greater_than)?;
-        Ok(result_cell)
+        region.assign_advice(|| "gt", self.config.is_gt, 0, || greater_than)
     }
 }
 
@@ -291,6 +307,19 @@ mod tests {
         let output = Fp::ZERO;
         let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
         prover.assert_satisfied();
+    }
+
+    #[test]
+    fn test_x_too_large() {
+        let k = 9;
+        let circuit = MyCircuit::<Fp> {
+            x: 256,
+            y: 64,
+            _marker: PhantomData,
+        };
+        let output = Fp::ZERO;
+        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
+        assert!(prover.verify().is_err());
     }
 
     #[test]

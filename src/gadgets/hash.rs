@@ -371,18 +371,6 @@ mod tests {
     }
 
     #[test]
-    fn test_256_too_large() {
-        let k = 9;
-        let circuit = MyCircuit::<Fp> {
-            input: 256,
-            _marker: PhantomData,
-        };
-        let output = Fp::from(0);
-        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
-        assert!(prover.verify().is_err());
-    }
-
-    #[test]
     fn plot() {
         use plotters::prelude::*;
 
