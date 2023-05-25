@@ -10,6 +10,7 @@ use ndarray::{Array2, Array3};
 use super::greater_than::{GreaterThanChip, GreaterThanChipConfig, GreaterThanInstructions};
 
 pub trait EncodeImageInstructions<F: PrimeFieldBits> {
+    /// Maps an image to a bit string.
     fn encode_image(
         &self,
         layouter: impl Layouter<F>,
@@ -23,6 +24,12 @@ pub struct EncodeImageChipConfig {
     greater_than_chip_config: GreaterThanChipConfig,
 }
 
+/// Encodes an image into a bit string, as follows:
+/// - Each pixel intensity is passed to [`GreaterThanChip`] for each threshold.
+///   This also range-checks the intensity to make sure it's in the range [0, 255].
+///   - As a special case, if the threshold is 0, a constant "1" is returned
+///     (as the intensity is always greater than 1).
+/// - Intensities belonging to the same pixel are constrained to be equal.
 pub struct EncodeImageChip<F: PrimeFieldBits> {
     greater_than_chip: GreaterThanChip<F>,
     config: EncodeImageChipConfig,
@@ -75,6 +82,8 @@ impl<F: PrimeFieldBits> EncodeImageInstructions<F> for EncodeImageChip<F> {
 
                     let bit_cell = if threshold == 0 {
                         // If the threshold is zero, the bit is always one, regardless of the of the intensity.
+                        // Unfortunately, this has to be handled separately, as the greater than gadget can't
+                        // handle a threshold of -1 (see below).
                         layouter.assign_region(
                             || "bit is one",
                             |mut region| {

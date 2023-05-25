@@ -40,19 +40,22 @@ struct WnnConfig {
 #[derive(Clone, Debug)]
 pub struct WnnChipConfig<F: PrimeFieldBits> {
     encode_image_chip_config: EncodeImageChipConfig,
+    bit2num_chip_config: Bits2NumChipConfig,
     hash_chip_config: HashConfig<F>,
     bloom_filter_chip_config: BloomFilterChipConfig,
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
-    bit2num_chip_config: Bits2NumChipConfig,
 }
 
 /// Implements a BTHOWeN- style weightless neural network.
 ///
-/// This happens in three steps:
-/// 1. The [`HashChip`] is used to range-check and hash the inputs.
-/// 2. The [`BloomFilterChip`] is used to look up the bloom filter responses
+/// This happens in the following steps:
+/// 1. The [`EncodeImageChip`] is used to binarize the input image.
+/// 2. The input bits are permuted.
+/// 3. The [`Bits2NumChip`] is used to convert the bits to numbers.
+/// 4. The [`HashChip`] hash the wach number.
+/// 5. The [`BloomFilterChip`] is used to look up the bloom filter responses
 ///    (for each input and each class).
-/// 3. The [`ResponseAccumulatorChip`] is used to accumulate the responses.
+/// 6. The [`ResponseAccumulatorChip`] is used to accumulate the responses.
 struct WnnChip<F: PrimeFieldBits> {
     encode_image_chip: EncodeImageChip<F>,
     bits2num_chip: Bits2NumChip<F>,
