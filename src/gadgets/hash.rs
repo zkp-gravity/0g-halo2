@@ -222,7 +222,7 @@ mod tests {
         plonk::{Circuit, Column, Instance, TableColumn},
     };
 
-    use crate::gadgets::range_check::RangeCheckConfig;
+    use crate::gadgets::range_check::{load_bytes_column, RangeCheckConfig};
 
     use super::{HashChip, HashConfig, HashFunctionConfig, HashInstructions};
 
@@ -309,7 +309,7 @@ mod tests {
                 },
             )?;
 
-            RangeCheckConfig::<F>::load_bytes_column(&mut layouter, config.table_column)?;
+            load_bytes_column(&mut layouter, config.table_column)?;
             let hash_chip = HashChip::construct(config.hash_config);
             let hash_value = hash_chip.hash(layouter.namespace(|| "hash"), assigned_input)?;
 

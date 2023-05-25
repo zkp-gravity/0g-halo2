@@ -198,7 +198,7 @@ mod tests {
         plonk::{Circuit, Column, ConstraintSystem, Error, Instance, TableColumn},
     };
 
-    use crate::gadgets::range_check::RangeCheckConfig;
+    use crate::gadgets::range_check::load_bytes_column;
 
     use super::{GreaterThanChip, GreaterThanChipConfig, GreaterThanInstructions};
 
@@ -257,7 +257,7 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            RangeCheckConfig::load_bytes_column(&mut layouter, config.table_column)?;
+            load_bytes_column(&mut layouter, config.table_column)?;
             let greater_than_chip = GreaterThanChip::construct(config.greater_than_config);
             let (_, result) = greater_than_chip.greater_than_witness(
                 &mut layouter,
