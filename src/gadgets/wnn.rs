@@ -8,16 +8,18 @@ use halo2_proofs::{
 use ndarray::{array, Array1, Array2, Array3};
 
 use crate::gadgets::{
-    bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
-    bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
-    bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
-    hash::{HashChip, HashConfig, HashInstructions},
-    range_check::RangeCheckConfig,
-    response_accumulator::ResponseAccumulatorInstructions,
-};
-use crate::gadgets::{
     hash::HashFunctionConfig,
     response_accumulator::{ResponseAccumulatorChip, ResponseAccumulatorChipConfig},
+};
+use crate::{
+    gadgets::{
+        bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
+        bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
+        bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
+        hash::{HashChip, HashConfig, HashInstructions},
+        range_check::RangeCheckConfig,
+        response_accumulator::ResponseAccumulatorInstructions,
+    },
 };
 
 use super::greater_than::{GreaterThanChip, GreaterThanChipConfig, GreaterThanInstructions};
@@ -135,7 +137,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         );
         let lookup_range_check_config = RangeCheckConfig::configure(
             meta,
-            advice_columns[0],
+            advice_columns[5],
             // Re-use byte column of the bloom filter
             bloom_filter_chip_config.byte_column,
         );
@@ -153,7 +155,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
 
         let bit2num_chip_config =
-            Bits2NumChip::configure(meta, advice_columns[1], advice_columns[5]);
+            Bits2NumChip::configure(meta, advice_columns[4], advice_columns[5]);
 
         WnnChipConfig {
             greater_than_chip_config,
@@ -433,69 +435,97 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
+#[cfg(test)]
+mod tests {
 
-//     use halo2_proofs::dev::MockProver;
-//     use halo2_proofs::halo2curves::bn256::Fr as Fp;
-//     use ndarray::Array3;
+    use halo2_proofs::dev::MockProver;
+    use halo2_proofs::halo2curves::bn256::Fr as Fp;
+    use ndarray::{array, Array3};
 
-//     use super::{WnnCircuit, WnnCircuitParams};
+    use super::{WnnCircuit, WnnCircuitParams};
 
-//     const PARAMS: WnnCircuitParams = WnnCircuitParams {
-//         p: (1 << 21) - 9,
-//         l: 20,
-//         n_hashes: 2,
-//         bits_per_hash: 10,
-//         bits_per_filter: 15,
-//     };
+    const PARAMS: WnnCircuitParams = WnnCircuitParams {
+        p: 2097143, // (1 << 21) - 9
+        l: 20,
+        n_hashes: 2,
+        bits_per_hash: 10,
+        bits_per_filter: 12,
+    };
 
-//     #[test]
-//     fn test() {
-//         let k = 13;
-//         let input = vec![
-//             true, false, true, false, false, false, true, false, false, false, false, true, false,
-//             false, false, true, false, false, false, false, true, true, true, true, false, true,
-//             false, true, true, true,
-//         ];
-//         // First, we join the bits into two 15 bit numbers 2117 and 30177
-//         // Then joint input numbers hash to the following indices:
-//         // - 2117 -> (2117^3) % (2^21 - 9) % (1024^2) = 260681
-//         //   - 260681 % 1024 = 585
-//         //   - 260681 // 1024 = 254
-//         // - 30177 -> (30177^3) % (2^21 - 9) % (1024^2) = 260392
-//         //   - 260392 % 1024 = 296
-//         //   - 260392 // 1024 = 254
-//         // We'll set the bloom filter such that we get one positive response for he first
-//         // class and two positive responses for the second class.
-//         let mut bloom_filter_arrays = Array3::<u8>::ones((3, 2, 1024)).mapv(|_| false);
-//         // First class
-//         bloom_filter_arrays[[0, 0, 585]] = true;
-//         bloom_filter_arrays[[0, 0, 254]] = true;
-//         bloom_filter_arrays[[0, 1, 296]] = true;
-//         // Second class
-//         bloom_filter_arrays[[1, 0, 585]] = true;
-//         bloom_filter_arrays[[1, 0, 254]] = true;
-//         bloom_filter_arrays[[1, 1, 296]] = true;
-//         bloom_filter_arrays[[1, 1, 254]] = true;
+    fn make_test_circuit() -> WnnCircuit<Fp> {
+        // A 4x3 image
+        let image = array![[70, 100, 150], [20, 110, 200], [27, 50, 211], [200, 100, 3]];
+        // Two thresholds for each pixel
+        let binarization_thresholds = array![
+            [[50, 150], [0, 50], [200, 256]],
+            [[10, 80], [100, 200], [50, 150]],
+            [[0, 100], [100, 200], [0, 100]],
+            [[0, 100], [100, 200], [0, 100]]
+        ];
+        // -> This leads to the bit vector [
+        //     // First threshold
+        //     1, 1, 0,
+        //     1, 1, 1,
+        //     1, 0, 1,
+        //     1, 1, 1,
+        //     // Second threshold
+        //     0, 1, 0,
+        //     0, 0, 1,
+        //     0, 0, 1,
+        //     1, 0, 0
+        // ]
+        let input_permutation = array![
+            6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5
+        ];
+        // --> This leads to the bit vector:[
+        //     1, 0, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1,
+        //     0, 0, 1, 1, 0, 0, 1, 1, 0, 1, 1, 1
+        // ]
+        // --> By interpreting it as 2 little endian number representations, we get indices:
+        //     2237, 3788
+        // --> The corresponding MishMash hashes are and indices:
+        //     - 2237 -> (2237^3) % 2097143 % (2^20) = 825286
+        //       - 825286 % 1024 = 966
+        //       - 825286 // 1024 = 805
+        //     - 3788 -> (3788^3) % 2097143 % (2^20) = 47598
+        //       - 47598 % 1024 = 494
+        //       - 47598 // 1024 = 46
+        // --> We'll set the bloom filter such that we get one positive response for he first
+        //     class and two positive responses for the second class.
+        let mut bloom_filter_arrays = Array3::<u8>::ones((2, 2, 1024)).mapv(|_| false);
+        // First class
+        bloom_filter_arrays[[0, 0, 966]] = true;
+        bloom_filter_arrays[[0, 0, 805]] = true;
+        bloom_filter_arrays[[0, 1, 494]] = true;
+        // Second class
+        bloom_filter_arrays[[1, 0, 966]] = true;
+        bloom_filter_arrays[[1, 0, 805]] = true;
+        bloom_filter_arrays[[1, 1, 494]] = true;
+        bloom_filter_arrays[[1, 1, 46]] = true;
 
-//         let circuit = WnnCircuit::<Fp>::new(input, bloom_filter_arrays, PARAMS);
+        WnnCircuit::new(
+            image,
+            bloom_filter_arrays,
+            binarization_thresholds,
+            input_permutation,
+            PARAMS,
+        )
+    }
 
-//         let expected_result = vec![Fp::from(1), Fp::from(2)];
+    #[test]
+    fn test() {
+        let k = 13;
 
-//         let prover = MockProver::run(k, &circuit, vec![expected_result]).unwrap();
-//         prover.assert_satisfied();
-//     }
+        let circuit = make_test_circuit();
 
-//     #[test]
-//     fn plot() {
-//         let bloom_filter_arrays = Array3::<u8>::ones((2, 2, 1024)).mapv(|_| true);
-//         // This is the input that will be joint into [2, 7]
-//         let inputs = vec![
-//             false, true, false, false, false, false, false, false, false, false, false, false,
-//             false, false, false, true, true, true, false, false, false, false, false, false, false,
-//             false, false, false, false, false,
-//         ];
-//         WnnCircuit::<Fp>::new(inputs, bloom_filter_arrays, PARAMS).plot("wnn-layout.png", 9);
-//     }
-// }
+        let expected_result = vec![Fp::from(1), Fp::from(2)];
+
+        let prover = MockProver::run(k, &circuit, vec![expected_result]).unwrap();
+        prover.assert_satisfied();
+    }
+
+    #[test]
+    fn plot() {
+        make_test_circuit().plot("wnn-layout.png", 9);
+    }
+}
