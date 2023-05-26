@@ -43,7 +43,7 @@ pub struct WnnConfig {
 
 #[derive(Clone, Debug)]
 pub struct WnnChipConfig<F: PrimeFieldBits> {
-    encode_image_chip_config: EncodeImageChipConfig,
+    encode_image_chip_config: EncodeImageChipConfig<F>,
     bits2num_chip_config: Bits2NumChipConfig,
     hash_chip_config: HashConfig<F>,
     bloom_filter_chip_config: BloomFilterChipConfig,
@@ -131,6 +131,12 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             advice_columns,
             wnn_config.bloom_filter_config.clone(),
         );
+        let lookup_range_check_config = RangeCheckConfig::configure(
+            meta,
+            advice_columns[3],
+            // Re-use byte column of the bloom filter
+            bloom_filter_chip_config.byte_column,
+        );
         let encode_image_chip_config = EncodeImageChip::configure(
             meta,
             advice_columns[0],
@@ -139,12 +145,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             advice_columns[3],
             // Re-use byte column of the bloom filter
             bloom_filter_chip_config.byte_column,
-        );
-        let lookup_range_check_config = RangeCheckConfig::configure(
-            meta,
-            advice_columns[5],
-            // Re-use byte column of the bloom filter
-            bloom_filter_chip_config.byte_column,
+            lookup_range_check_config.clone(),
         );
         let hash_chip_config = HashChip::configure(
             meta,
