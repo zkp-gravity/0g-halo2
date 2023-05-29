@@ -41,7 +41,7 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
     hash_chip_config: HashConfig<F>,
     bloom_filter_chip_config: BloomFilterChipConfig,
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
-    bit2num_chip_config: Bits2NumChipConfig,
+    bits2num_chip_config: Bits2NumChipConfig,
     input: Column<Advice>,
 }
 
@@ -76,7 +76,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             .into_shape((n_classes * n_inputs, n_filters))
             .unwrap();
 
-        let bits2num_chip = Bits2NumChip::construct(config.bit2num_chip_config.clone());
+        let bits2num_chip = Bits2NumChip::construct(config.bits2num_chip_config.clone());
         let hash_chip = HashChip::construct(config.hash_chip_config.clone());
         let bloom_filter_chip = BloomFilterChip::construct(
             config.bloom_filter_chip_config.clone(),
@@ -127,14 +127,14 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         let response_accumulator_chip_config =
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
 
-        let bit2num_chip_config =
+        let bits2num_chip_config =
             Bits2NumChip::configure(meta, advice_columns[1], advice_columns[5]);
 
         WnnChipConfig {
             hash_chip_config,
             bloom_filter_chip_config,
             response_accumulator_chip_config,
-            bit2num_chip_config,
+            bits2num_chip_config,
             input: advice_columns[0],
         }
     }
