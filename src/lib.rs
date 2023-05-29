@@ -2,16 +2,18 @@
 //!
 //! # Example
 //! ```
+//! use std::path::Path;
 //! use zero_g::{load_image, load_wnn};
 //! use halo2_proofs::poly::{
 //!     commitment::ParamsProver, kzg::commitment::ParamsKZG,
 //! };
 //!
-//! let img = load_image(&Path::new("benches/example_image_7.png")).unwrap();
-//! let wnn = load_wnn(&Path::new("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")).unwrap();
+//! let img = load_image(Path::new("benches/example_image_7.png")).unwrap();
+//! let wnn = load_wnn(Path::new("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")).unwrap();
+//! let k = 12;
 //!
 //! // Asserts that all constraints are satisfied
-//! wnn.mock_proof(&img, 12);
+//! wnn.mock_proof(&img, k);
 //!
 //! // Generate keys
 //! let kzg_params = ParamsKZG::new(k);
