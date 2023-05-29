@@ -252,6 +252,7 @@ pub struct WnnCircuitParams {
     pub bits_per_filter: usize,
 }
 
+/// A circuit using [`WnnChip`] to predict the class of an (secret) image.
 pub struct WnnCircuit<F: PrimeFieldBits> {
     image: Array2<u8>,
     bloom_filter_arrays: Array3<bool>,
