@@ -45,7 +45,7 @@ pub struct Wnn {
 /// # Example
 /// ```
 /// use zero_g::io::{image::load_image, model::load_wnn};
-/// use halo2_proofs::poly{
+/// use halo2_proofs::poly::{
 ///     commitment::ParamsProver, kzg::commitment::ParamsKZG,
 /// };
 ///
