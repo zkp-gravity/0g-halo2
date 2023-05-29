@@ -7,6 +7,8 @@ use halo2_proofs::{
 };
 use ndarray::{Array2, Array3};
 
+use crate::gadgets::greater_than::GreaterThanWitnessResult;
+
 use super::greater_than::{GreaterThanChip, GreaterThanChipConfig, GreaterThanInstructions};
 
 pub trait EncodeImageInstructions<F: PrimeFieldBits> {
@@ -106,14 +108,14 @@ impl<F: PrimeFieldBits> EncodeImageInstructions<F> for EncodeImageChip<F> {
                             None => {
                                 // For the first cell, we want to remember the intensity cell, so that we can
                                 // add a copy constraint for the other thresholds.
-                                let (intensity_cell, bit_cell) =
+                                let GreaterThanWitnessResult { x_cell, gt_cell } =
                                     self.greater_than_chip.greater_than_witness(
                                         &mut layouter,
                                         F::from(image[(i, j)] as u64),
                                         t,
                                     )?;
-                                intensity_cells.insert((i, j), intensity_cell);
-                                bit_cell
+                                intensity_cells.insert((i, j), x_cell);
+                                gt_cell
                             }
                             Some(first_cell) => {
                                 // For the other cells, we want to add a copy constraint to the first cell.

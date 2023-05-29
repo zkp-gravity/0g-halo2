@@ -571,11 +571,7 @@ mod tests {
             assert_eq!(results.len(), 2);
 
             for (i, lookup_result) in results.iter().enumerate() {
-                layouter.constrain_instance(
-                    lookup_result.word.cell(),
-                    config.instance,
-                    3 * i,
-                )?;
+                layouter.constrain_instance(lookup_result.word.cell(), config.instance, 3 * i)?;
                 layouter.constrain_instance(
                     lookup_result.byte_index.cell(),
                     config.instance,
