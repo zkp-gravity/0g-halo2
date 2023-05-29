@@ -38,6 +38,33 @@ pub struct Wnn {
     binarization_thresholds: Array3<f32>,
 }
 
+/// Implementation of a [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural network (WNN).
+///
+/// Implements model inference and proof of inference.
+///
+/// # Example
+/// ```
+/// use zero_g::io::{image::load_image, model::load_wnn};
+/// use halo2_proofs::poly{
+///     commitment::ParamsProver, kzg::commitment::ParamsKZG,
+/// };
+///
+/// let img = load_image(&Path::new("benches/example_image_7.png")).unwrap();
+/// let wnn = load_wnn(&Path::new("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")).unwrap();
+///
+/// // Asserts that all constraints are satisfied
+/// wnn.mock_proof(&img, 12);
+///
+/// // Generate keys
+/// let kzg_params = ParamsKZG::new(k);
+/// let pk = wnn.generate_proving_key(&kzg_params);
+///
+/// // Generate proof
+/// let (proof, outputs) = wnn.proof(&pk, &kzg_params, image);
+///
+/// // Verify proof
+/// wnn.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
+/// ```
 impl Wnn {
     pub fn new(
         num_classes: usize,
