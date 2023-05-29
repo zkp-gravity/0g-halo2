@@ -11,7 +11,11 @@ use crate::utils::integer_division;
 use super::range_check::RangeCheckConfig;
 
 pub trait HashInstructions<F: PrimeFieldBits> {
-    fn hash(&self, layouter: impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error>;
+    fn hash(
+        &self,
+        layouter: impl Layouter<F>,
+        input: AssignedCell<F, F>,
+    ) -> Result<AssignedCell<F, F>, Error>;
 }
 
 #[derive(Debug, Clone)]
@@ -50,12 +54,13 @@ pub struct HashConfig<F: PrimeFieldBits> {
 /// The following constraints are checked:
 /// - `x^3 = quotient * p + remainder`
 /// - `remainder = msb * 2^l + hash`
-/// - `x` is in [0, 2^n_bits)
 /// - `quotient` is in [0, 2^(3 * n_bits - l))
 /// - `msb` is in 0 or 1
 /// - `remainder` is in [0, p)
 ///
-/// Note that the `hash` column is not range-checked to be in [0, 2^l).
+/// Note that `x` is **not** range-checked. This is assumed to happen
+/// elsewhere in the circuit.
+/// Also note that the `hash` column is not range-checked to be in [0, 2^l).
 /// This is assumed to happen elsewhere in the circuit.
 #[derive(Debug, Clone)]
 pub struct HashChip<F: PrimeFieldBits> {
@@ -63,6 +68,7 @@ pub struct HashChip<F: PrimeFieldBits> {
 }
 
 impl<F: PrimeFieldBits> HashChip<F> {
+    #[allow(clippy::too_many_arguments)]
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
@@ -120,10 +126,11 @@ impl<F: PrimeFieldBits> HashChip<F> {
         HashChip { config }
     }
 
+    #[allow(clippy::type_complexity)]
     fn compute_hash(
         &self,
         mut layouter: impl Layouter<F>,
-        input: F,
+        input: AssignedCell<F, F>,
     ) -> Result<
         (
             AssignedCell<F, F>,
@@ -141,12 +148,8 @@ impl<F: PrimeFieldBits> HashChip<F> {
             |mut region| {
                 self.config.selector.enable(&mut region, 0)?;
 
-                let input_cell = region.assign_advice(
-                    || "input",
-                    self.config.input,
-                    0,
-                    || Value::known(input),
-                )?;
+                let input_cell =
+                    input.copy_advice(|| "input", &mut region, self.config.input, 0)?;
                 let input = input_cell.value_field().evaluate();
                 let input_cubed = input * input * input;
                 let quotient = input_cubed.and_then(|input_cubed| {
@@ -172,20 +175,20 @@ impl<F: PrimeFieldBits> HashChip<F> {
 }
 
 impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
-    fn hash(&self, mut layouter: impl Layouter<F>, input: F) -> Result<AssignedCell<F, F>, Error> {
-        let (input, quotient, remainder, msb, output) =
+    fn hash(
+        &self,
+        mut layouter: impl Layouter<F>,
+        input: AssignedCell<F, F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let (_input, quotient, remainder, msb, output) =
             self.compute_hash(layouter.namespace(|| "hash"), input)?;
 
         let HashFunctionConfig { p, l, n_bits } = self.config.hash_function_config;
 
-        // Check that all cells have the right number of bits, with two exceptions:
+        // Check that all cells have the right number of bits, with three exceptions:
+        // - The input is assumed to already be range-checked
         // - output should be l bits, but it's later decomposed and used in a table lookup, which enforces the range
         // - remainder should be l + 1 bits, but does not need to be range-checked, because we verify that r = 2^l * msb + output
-        self.config.range_check_config.range_check(
-            layouter.namespace(|| "range check input"),
-            input,
-            n_bits,
-        )?;
         self.config.range_check_config.range_check(
             layouter.namespace(|| "range check quotient"),
             quotient,
@@ -213,6 +216,7 @@ mod tests {
     use std::marker::PhantomData;
 
     use ff::PrimeFieldBits;
+    use halo2_proofs::circuit::Value;
     use halo2_proofs::{
         circuit::SimpleFloorPlanner,
         dev::MockProver,
@@ -220,7 +224,7 @@ mod tests {
         plonk::{Circuit, Column, Instance, TableColumn},
     };
 
-    use crate::gadgets::range_check::RangeCheckConfig;
+    use crate::gadgets::range_check::{load_bytes_column, RangeCheckConfig};
 
     use super::{HashChip, HashConfig, HashFunctionConfig, HashInstructions};
 
@@ -295,9 +299,21 @@ mod tests {
             config: Self::Config,
             mut layouter: impl halo2_proofs::circuit::Layouter<F>,
         ) -> Result<(), halo2_proofs::plonk::Error> {
-            RangeCheckConfig::<F>::load_bytes_column(&mut layouter, config.table_column)?;
+            let assigned_input = layouter.assign_region(
+                || "input",
+                |mut region| {
+                    region.assign_advice(
+                        || "input",
+                        config.hash_config.input,
+                        0,
+                        || Value::known(F::from(self.input)),
+                    )
+                },
+            )?;
+
+            load_bytes_column(&mut layouter, config.table_column)?;
             let hash_chip = HashChip::construct(config.hash_config);
-            let hash_value = hash_chip.hash(layouter.namespace(|| "hash"), F::from(self.input))?;
+            let hash_value = hash_chip.hash(layouter.namespace(|| "hash"), assigned_input)?;
 
             layouter.constrain_instance(hash_value.cell(), config.instance, 0)?;
             Ok(())
@@ -354,18 +370,6 @@ mod tests {
         let output = Fp::from(0);
         let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
         prover.assert_satisfied();
-    }
-
-    #[test]
-    fn test_256_too_large() {
-        let k = 9;
-        let circuit = MyCircuit::<Fp> {
-            input: 256,
-            _marker: PhantomData,
-        };
-        let output = Fp::from(0);
-        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
-        assert!(prover.verify().is_err());
     }
 
     #[test]

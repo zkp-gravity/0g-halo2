@@ -151,7 +151,7 @@ impl<F: PrimeFieldBits> ArrayLookupChip<F> {
             .map(|i| {
                 let bits = bloom_filter_arrays.row(i).to_vec();
                 bits.chunks_exact(word_length)
-                    .map(|word_bits| from_be_bits::<F>(&word_bits))
+                    .map(|word_bits| from_be_bits::<F>(word_bits))
                     .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
@@ -571,11 +571,7 @@ mod tests {
             assert_eq!(results.len(), 2);
 
             for (i, lookup_result) in results.iter().enumerate() {
-                layouter.constrain_instance(
-                    lookup_result.word.cell(),
-                    config.instance,
-                    3 * i + 0,
-                )?;
+                layouter.constrain_instance(lookup_result.word.cell(), config.instance, 3 * i)?;
                 layouter.constrain_instance(
                     lookup_result.byte_index.cell(),
                     config.instance,
@@ -638,10 +634,10 @@ mod tests {
             _marker: PhantomData,
         };
         let output = vec![
-            Fp::from(words[1]),
+            words[1],
             Fp::from(0b001u64),
             Fp::from(0b101u64),
-            Fp::from(words[0]),
+            words[0],
             Fp::from(0b111u64),
             Fp::from(0b000u64),
         ];
@@ -662,10 +658,10 @@ mod tests {
             _marker: PhantomData,
         };
         let output = vec![
-            Fp::from(words[3]),
+            words[3],
             Fp::from(0b001u64),
             Fp::from(0b101u64),
-            Fp::from(words[3]),
+            words[3],
             Fp::from(0b111u64),
             Fp::from(0b000u64),
         ];
@@ -686,10 +682,10 @@ mod tests {
             _marker: PhantomData,
         };
         let output = vec![
-            Fp::from(words[5]),
+            words[5],
             Fp::from(0b001u64),
             Fp::from(0b101u64),
-            Fp::from(words[4]),
+            words[4],
             Fp::from(0b111u64),
             Fp::from(0b000u64),
         ];

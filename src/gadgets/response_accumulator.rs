@@ -11,7 +11,7 @@ pub trait ResponseAccumulatorInstructions<F: PrimeField> {
     fn accumulate_responses(
         &self,
         layouter: &mut impl Layouter<F>,
-        responses: &Vec<AssignedCell<F, F>>,
+        responses: &[AssignedCell<F, F>],
     ) -> Result<AssignedCell<F, F>, Error>;
 }
 
@@ -77,13 +77,11 @@ impl<F: PrimeField> ResponseAccumulatorInstructions<F> for ResponseAccumulatorCh
     fn accumulate_responses(
         &self,
         layouter: &mut impl Layouter<F>,
-        responses: &Vec<AssignedCell<F, F>>,
+        responses: &[AssignedCell<F, F>],
     ) -> Result<AssignedCell<F, F>, Error> {
         layouter.assign_region(
             || "accumulate_responses",
             |mut region| {
-                let n_rows = (responses.len() + 3) / 4;
-
                 let row_sums = responses
                     .chunks(4)
                     .map(|row| {
@@ -100,7 +98,7 @@ impl<F: PrimeField> ResponseAccumulatorInstructions<F> for ResponseAccumulatorCh
                     F::ZERO,
                 )?;
                 let mut current_acc_value = Value::known(F::ZERO);
-                for row_index in 0..n_rows {
+                for (row_index, cur_row_sum) in row_sums.iter().enumerate() {
                     self.config.selector.enable(&mut region, row_index)?;
                     for i in 0..4 {
                         let index = row_index * 4 + i;
@@ -120,7 +118,7 @@ impl<F: PrimeField> ResponseAccumulatorInstructions<F> for ResponseAccumulatorCh
                             )?;
                         }
                     }
-                    current_acc_value = current_acc_value + row_sums[row_index];
+                    current_acc_value = current_acc_value + cur_row_sum;
                     acc_cell = region.assign_advice(
                         || format!("acc {}", row_index + 1),
                         self.config.advice_columns[4],

@@ -47,12 +47,43 @@ pub struct Wnn {
     /// Permutation of input bits, shape (num_inputs * bits_per_input)
     input_permutation: Array1<u64>,
     /// Thresholds for pixels, shape (width, height, bits_per_input)
-    binarization_thresholds: Array3<f32>,
+    /// The numbers are in the range [0, 256].
+    binarization_thresholds: Array3<u16>,
 }
 
+/// Implementation of a [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural network (WNN).
+///
+/// Implements model inference and proof of inference.
+///
+/// # Example
+/// ```
+/// use zero_g::io::{image::load_image, model::load_wnn};
+/// use halo2_proofs::poly::{
+///     commitment::ParamsProver, kzg::commitment::ParamsKZG,
+/// };
+/// use std::path::Path;
+///
+/// let img = load_image(&Path::new("benches/example_image_7.png")).unwrap();
+/// let wnn = load_wnn(&Path::new("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")).unwrap();
+/// let k = 12;
+///
+/// // Asserts that all constraints are satisfied
+/// wnn.mock_proof(&img, k);
+///
+/// // Generate keys
+/// let kzg_params = ParamsKZG::new(k);
+/// let pk = wnn.generate_proving_key(&kzg_params);
+///
+/// // Generate proof
+/// let (proof, outputs) = wnn.proof(&pk, &kzg_params, &img);
+///
+/// // Verify proof
+/// wnn.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
+/// ```
 impl Wnn {
     /// Constructs a new WNN.
     /// Instead of calling this function directly, consider using [`crate::load_wnn`].
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         num_classes: usize,
         num_filter_entries: usize,
@@ -62,7 +93,7 @@ impl Wnn {
 
         bloom_filters: Array3<bool>,
         input_order: Array1<u64>,
-        binarization_thresholds: Array3<f32>,
+        binarization_thresholds: Array3<u16>,
     ) -> Self {
         Self {
             num_classes,
@@ -88,7 +119,7 @@ impl Wnn {
             for i in 0..width {
                 for j in 0..height {
                     image_bits
-                        .push(image[(i, j)] as f32 >= self.binarization_thresholds[(i, j, b)]);
+                        .push(image[(i, j)] as u16 >= self.binarization_thresholds[(i, j, b)]);
                 }
             }
         }
@@ -109,15 +140,15 @@ impl Wnn {
         assert_eq!(image_bits.len(), self.input_permutation.shape()[0]);
 
         // Permute inputs
-        let inputs_permuted: Vec<bool> = self
+        let permuted_bits = self
             .input_permutation
             .iter()
             .map(|i| image_bits[*i as usize])
-            .collect();
+            .collect::<Vec<_>>();
 
         // Pack inputs into integers of `num_filter_inputs` bits
         // (LITTLE endian order)
-        inputs_permuted
+        permuted_bits
             .chunks_exact(self.num_filter_inputs)
             .map(|chunk| {
                 chunk
@@ -174,7 +205,7 @@ impl Wnn {
     }
 
     /// Returns the Halo2 circuit corresponding to this WNN.
-    fn get_circuit(&self, hash_inputs: Vec<u64>) -> WnnCircuit<Fp> {
+    fn get_circuit(&self, image: &Array2<u8>) -> WnnCircuit<Fp> {
         let params = WnnCircuitParams {
             p: self.p,
             l: self.num_filter_hashes * (self.num_filter_entries as f32).log2() as usize,
@@ -182,7 +213,13 @@ impl Wnn {
             bits_per_hash: (self.num_filter_entries as f32).log2() as usize,
             bits_per_filter: self.num_filter_inputs,
         };
-        WnnCircuit::new(hash_inputs, self.bloom_filters.clone(), params)
+        WnnCircuit::new(
+            image.clone(),
+            self.bloom_filters.clone(),
+            self.binarization_thresholds.clone(),
+            self.input_permutation.clone(),
+            params,
+        )
     }
 
     /// Check that the circuit is satisfied for the given image.
@@ -194,9 +231,9 @@ impl Wnn {
             .map(|o| Fp::from(o as u64))
             .collect();
 
-        let circuit = self.get_circuit(hash_inputs);
+        let circuit = self.get_circuit(image);
 
-        let prover = MockProver::run(k, &circuit, vec![outputs.clone()]).unwrap();
+        let prover = MockProver::run(k, &circuit, vec![outputs]).unwrap();
         prover.assert_satisfied();
 
         println!("Valid!");
@@ -215,14 +252,11 @@ impl Wnn {
     /// The verification key can be accessed via `pk.get_vk()`.
     pub fn generate_proving_key(&self, kzg_params: &ParamsKZG<Bn256>) -> ProvingKey<G1Affine> {
         // They keys should not depend on the input, so we're generating a dummy input here
-        let dummy_inputs = self.encode_image(&Array2::zeros(self.img_shape()));
-
-        let circuit = self.get_circuit(dummy_inputs);
+        let circuit = self.get_circuit(&Array2::zeros(self.img_shape()));
 
         let vk = keygen_vk(kzg_params, &circuit).expect("keygen_vk should not fail");
-        let pk = keygen_pk(kzg_params, vk, &circuit).expect("keygen_pk should not fail");
 
-        pk
+        keygen_pk(kzg_params, vk, &circuit).expect("keygen_pk should not fail")
     }
 
     /// Generate a proof for the given image.
@@ -239,13 +273,13 @@ impl Wnn {
             .map(|o| Fp::from(*o as u64))
             .collect();
 
-        let circuit = self.get_circuit(hash_inputs);
+        let circuit = self.get_circuit(image);
 
         let mut transcript: Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>> =
             Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof::<KZGCommitmentScheme<Bn256>, ProverGWC<Bn256>, _, _, _, _>(
-            &kzg_params,
-            &pk,
+            kzg_params,
+            pk,
             &[circuit],
             &[&[outputs.as_ref()]],
             OsRng,
@@ -259,15 +293,15 @@ impl Wnn {
     /// Verify the given proof.
     pub fn verify_proof(
         &self,
-        proof: &Vec<u8>,
+        proof: &[u8],
         kzg_params: &ParamsKZG<Bn256>,
         vk: &VerifyingKey<G1Affine>,
         outputs: &Vec<Fp>,
     ) {
-        let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        let strategy = SingleStrategy::new(&kzg_params);
+        let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(proof);
+        let strategy = SingleStrategy::new(kzg_params);
         verify_proof::<_, VerifierGWC<Bn256>, _, _, _>(
-            &kzg_params,
+            kzg_params,
             vk,
             strategy.clone(),
             &[&[outputs.as_ref()]],
