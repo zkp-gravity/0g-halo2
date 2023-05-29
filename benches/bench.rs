@@ -6,10 +6,7 @@ use halo2_proofs::{
     poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
 };
 use ndarray::Array2;
-use zero_g::{
-    io::{image::load_image, model::load_wnn},
-    wnn::Wnn,
-};
+use zero_g::{load_image, load_wnn, Wnn};
 
 fn setup() -> (Wnn, Array2<u8>, ParamsKZG<Bn256>) {
     let model_path = PathBuf::from("models/model_28input_256entry_1hash_1bpi.pickle.hdf5");

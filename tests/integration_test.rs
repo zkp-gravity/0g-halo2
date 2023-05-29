@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use zero_g::io::{image::load_image, model::load_wnn};
+use zero_g::{load_image, load_wnn};
 
 const IMG_PATH: &str = "benches/example_image_7.png";
 const MODEL_PATH_MNIST_TINY: &str = "models/model_28input_256entry_1hash_1bpi.pickle.hdf5";

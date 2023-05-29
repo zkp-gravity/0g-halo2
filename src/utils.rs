@@ -30,7 +30,7 @@ pub fn enable_range<F: PrimeField>(
     Ok(())
 }
 
-pub fn argmax(vec: &Vec<u32>) -> usize {
+pub fn argmax(vec: &Vec<u64>) -> usize {
     let mut index = 0;
     let mut max = 0;
     for (i, x) in vec.iter().enumerate() {

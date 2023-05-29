@@ -15,7 +15,7 @@ use halo2_proofs::{
         Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
     },
 };
-use ndarray::{Array1, Array2, Array3};
+use ndarray::{s, Array1, Array2, Array3};
 
 use halo2_proofs::halo2curves::bn256::{Bn256, Fr as Fp, G1Affine};
 use num_bigint::BigUint;
@@ -23,11 +23,23 @@ use rand_core::OsRng;
 
 use crate::gadgets::wnn::{WnnCircuit, WnnCircuitParams};
 
+/// Implementation of a [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural network (WNN).
+///
+/// Implements model inference and proof of inference.
 pub struct Wnn {
+    /// Number of classes (e.g. 10 for MNIST)
     num_classes: usize,
-    num_filter_entries: usize,
-    num_filter_hashes: usize,
+
+    /// Number fo input bits per filter
     num_filter_inputs: usize,
+
+    /// The length of the bloom filter array
+    num_filter_entries: usize,
+
+    /// The number of hashes used by the bloom filter
+    num_filter_hashes: usize,
+
+    /// Prime `p` used in the MishMash hash function
     p: u64,
 
     /// Bloom filter array, shape (num_classes, num_inputs * bits_per_input / num_filter_inputs, num_filter_entries)
@@ -38,34 +50,9 @@ pub struct Wnn {
     binarization_thresholds: Array3<f32>,
 }
 
-/// Implementation of a [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural network (WNN).
-///
-/// Implements model inference and proof of inference.
-///
-/// # Example
-/// ```
-/// use zero_g::io::{image::load_image, model::load_wnn};
-/// use halo2_proofs::poly::{
-///     commitment::ParamsProver, kzg::commitment::ParamsKZG,
-/// };
-///
-/// let img = load_image(&Path::new("benches/example_image_7.png")).unwrap();
-/// let wnn = load_wnn(&Path::new("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")).unwrap();
-///
-/// // Asserts that all constraints are satisfied
-/// wnn.mock_proof(&img, 12);
-///
-/// // Generate keys
-/// let kzg_params = ParamsKZG::new(k);
-/// let pk = wnn.generate_proving_key(&kzg_params);
-///
-/// // Generate proof
-/// let (proof, outputs) = wnn.proof(&pk, &kzg_params, image);
-///
-/// // Verify proof
-/// wnn.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
-/// ```
 impl Wnn {
+    /// Constructs a new WNN.
+    /// Instead of calling this function directly, consider using [`crate::load_wnn`].
     pub fn new(
         num_classes: usize,
         num_filter_entries: usize,
@@ -89,11 +76,10 @@ impl Wnn {
         }
     }
 
-    pub fn num_input_bits(&self) -> usize {
-        self.input_permutation.len()
-    }
-
-    pub fn encode_image(&self, image: &Array2<u8>) -> Vec<bool> {
+    /// Implements the thermometer encoding: Each pixels is mapped to a vector
+    /// of bits, one per threshold. The bit is set if the pixel value is greater
+    /// than or equal to the threshold.
+    fn thermometer_encoding(&self, image: &Array2<u8>) -> Vec<bool> {
         let (width, height) = (image.shape()[0], image.shape()[1]);
 
         let mut image_bits = vec![];
@@ -110,20 +96,23 @@ impl Wnn {
         image_bits
     }
 
+    /// Computes the MishMash hash: `x^3 % p % 2^l`
     fn mish_mash_hash(&self, x: u64) -> BigUint {
         let x = BigUint::from(x);
         let modulus = BigUint::from(self.num_filter_entries).pow(self.num_filter_hashes as u32);
         ((&x * &x * &x) % self.p) % modulus
     }
 
-    fn compute_hash_inputs(&self, input_bits: Vec<bool>) -> Vec<u64> {
-        assert_eq!(input_bits.len(), self.input_permutation.shape()[0]);
+    /// Encodes an image into a vector of filter indices
+    fn encode_image(&self, image: &Array2<u8>) -> Vec<u64> {
+        let image_bits = self.thermometer_encoding(image);
+        assert_eq!(image_bits.len(), self.input_permutation.shape()[0]);
 
         // Permute inputs
         let inputs_permuted: Vec<bool> = self
             .input_permutation
             .iter()
-            .map(|i| input_bits[*i as usize])
+            .map(|i| image_bits[*i as usize])
             .collect();
 
         // Pack inputs into integers of `num_filter_inputs` bits
@@ -139,52 +128,52 @@ impl Wnn {
             .collect()
     }
 
-    pub fn predict(&self, image: &Array2<u8>) -> Vec<u32> {
-        let input_bits = self.encode_image(image);
-        let hash_inputs = self.compute_hash_inputs(input_bits);
-        // This asserts that the number of filter inputs does not exceed the number of bits in a u64
-        assert_eq!(hash_inputs.len(), self.bloom_filters.shape()[1]);
+    /// Computes the bloom filter response for the given index.
+    ///
+    /// The index is hashed, split into multiple array indices.
+    /// The bloom filter response is true if all of the corresponding
+    /// array entries are true.
+    fn bloom_filter_lookup(&self, bloom_array: &[bool], index: u64) -> bool {
+        let hash = self.mish_mash_hash(index);
 
-        // Hash
-        let hash_outputs: Vec<BigUint> = hash_inputs
-            .into_iter()
-            .map(|x| self.mish_mash_hash(x))
-            .collect();
-        assert_eq!(hash_outputs.len(), self.bloom_filters.shape()[1]);
-
-        // Split hashes
-        let bloom_indices: Vec<Vec<usize>> = hash_outputs
-            .into_iter()
-            .map(|h| {
-                (0..self.num_filter_hashes)
-                    .map(|i| {
-                        ((&h / BigUint::from(self.num_filter_entries).pow(i as u32))
-                            % self.num_filter_entries)
-                            .try_into()
-                            .unwrap()
-                    })
-                    .collect()
+        // Split hash into multiple indices
+        let array_indices: Vec<usize> = (0..self.num_filter_hashes)
+            .map(|i| {
+                ((&hash / BigUint::from(self.num_filter_entries).pow(i as u32))
+                    % self.num_filter_entries)
+                    .try_into()
+                    .unwrap()
             })
             .collect();
-        assert_eq!(bloom_indices.len(), self.bloom_filters.shape()[1]);
+
+        array_indices.into_iter().all(|i| bloom_array[i])
+    }
+
+    /// Predicts a given image
+    pub fn predict(&self, image: &Array2<u8>) -> Vec<u64> {
+        let filter_indices = self.encode_image(image);
+        assert_eq!(filter_indices.len(), self.bloom_filters.shape()[1]);
 
         // Look up bloom filters
         (0..self.num_classes)
             .map(|c| {
-                bloom_indices
+                filter_indices
                     .iter()
                     .enumerate()
-                    .map(|(input_index, indices)| {
-                        indices
-                            .iter()
-                            .map(|i| self.bloom_filters[(c, input_index, *i)])
-                            .fold(true, |acc, b| acc && b) as u32
+                    .map(|(index_of_filter, index_into_filter)| {
+                        let bloom_filter_array = self
+                            .bloom_filters
+                            .slice(s![c, index_of_filter, ..])
+                            .to_slice()
+                            .unwrap();
+                        self.bloom_filter_lookup(bloom_filter_array, *index_into_filter) as u64
                     })
-                    .sum::<u32>()
+                    .sum()
             })
-            .collect::<Vec<_>>()
+            .collect()
     }
 
+    /// Returns the Halo2 circuit corresponding to this WNN.
     fn get_circuit(&self, hash_inputs: Vec<u64>) -> WnnCircuit<Fp> {
         let params = WnnCircuitParams {
             p: self.p,
@@ -196,13 +185,13 @@ impl Wnn {
         WnnCircuit::new(hash_inputs, self.bloom_filters.clone(), params)
     }
 
+    /// Check that the circuit is satisfied for the given image.
     pub fn mock_proof(&self, image: &Array2<u8>, k: u32) {
-        let input_bits = self.encode_image(image);
-        let hash_inputs = self.compute_hash_inputs(input_bits.clone());
+        let hash_inputs = self.encode_image(image);
         let outputs: Vec<Fp> = self
             .predict(image)
-            .iter()
-            .map(|o| Fp::from(*o as u64))
+            .into_iter()
+            .map(|o| Fp::from(o as u64))
             .collect();
 
         let circuit = self.get_circuit(hash_inputs);
@@ -214,13 +203,19 @@ impl Wnn {
         circuit.plot("real_wnn_layout.png", k);
     }
 
+    fn img_shape(&self) -> (usize, usize) {
+        (
+            self.binarization_thresholds.shape()[0],
+            self.binarization_thresholds.shape()[1],
+        )
+    }
+
     /// Generate a proving key and verification key.
     ///
     /// The verification key can be accessed via `pk.get_vk()`.
     pub fn generate_proving_key(&self, kzg_params: &ParamsKZG<Bn256>) -> ProvingKey<G1Affine> {
         // They keys should not depend on the input, so we're generating a dummy input here
-        let dummy_bits = (0..self.input_permutation.len()).map(|_| false).collect();
-        let dummy_inputs = self.compute_hash_inputs(dummy_bits);
+        let dummy_inputs = self.encode_image(&Array2::zeros(self.img_shape()));
 
         let circuit = self.get_circuit(dummy_inputs);
 
@@ -237,8 +232,7 @@ impl Wnn {
         kzg_params: &ParamsKZG<Bn256>,
         image: &Array2<u8>,
     ) -> (Vec<u8>, Vec<Fp>) {
-        let input_bits = self.encode_image(image);
-        let hash_inputs = self.compute_hash_inputs(input_bits.clone());
+        let hash_inputs = self.encode_image(image);
         let outputs: Vec<Fp> = self
             .predict(image)
             .iter()
@@ -282,6 +276,7 @@ impl Wnn {
         .unwrap();
     }
 
+    /// Generate a proof and verify it.
     pub fn proof_and_verify(&self, image: &Array2<u8>, k: u32) {
         println!("Key gen...");
         let start = Instant::now();

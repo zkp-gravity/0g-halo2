@@ -6,10 +6,7 @@ use std::{
 use clap::{Parser, Subcommand};
 use hdf5::Result;
 use indicatif::ProgressIterator;
-use zero_g::{
-    io::{image::load_image, model::load_wnn},
-    utils::argmax,
-};
+use zero_g::{load_image, load_wnn, utils::argmax};
 
 #[derive(Parser)]
 #[clap(name = "Zero G")]
