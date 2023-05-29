@@ -1,3 +1,5 @@
+//! Implementation of a gadget & circuit implementing a [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural network (WNN).
+
 use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
@@ -22,6 +24,7 @@ use crate::gadgets::{
 
 use super::encode_image::{EncodeImageChip, EncodeImageChipConfig, EncodeImageInstructions};
 
+/// Instructions for the [`WnnChip`].
 pub trait WnnInstructions<F: PrimeFieldBits> {
     /// Given an input vector, predicts the score for each class.
     fn predict(
@@ -31,10 +34,11 @@ pub trait WnnInstructions<F: PrimeFieldBits> {
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 }
 
+/// Configuration of the WNN.
 #[derive(Debug, Clone)]
-struct WnnConfig {
-    hash_function_config: HashFunctionConfig,
-    bloom_filter_config: BloomFilterConfig,
+pub struct WnnConfig {
+    pub hash_function_config: HashFunctionConfig,
+    pub bloom_filter_config: BloomFilterConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -56,7 +60,7 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
 /// 5. The [`BloomFilterChip`] is used to look up the bloom filter responses
 ///    (for each input and each class).
 /// 6. The [`ResponseAccumulatorChip`] is used to accumulate the responses.
-struct WnnChip<F: PrimeFieldBits> {
+pub struct WnnChip<F: PrimeFieldBits> {
     encode_image_chip: EncodeImageChip<F>,
     bits2num_chip: Bits2NumChip<F>,
     hash_chip: HashChip<F>,

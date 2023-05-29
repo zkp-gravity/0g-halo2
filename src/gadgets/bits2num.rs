@@ -4,7 +4,7 @@ use halo2_proofs::plonk::{Advice, Column, ConstraintSystem, Constraints, Error, 
 use halo2_proofs::poly::Rotation;
 use std::marker::PhantomData;
 
-pub(crate) trait Bits2NumInstruction<F: Field> {
+pub trait Bits2NumInstruction<F: Field> {
     /// Convert the bits in big endian order to a number.
     /// Bits are assumed to already be range-checked.
     fn convert_be(
@@ -23,7 +23,7 @@ pub(crate) trait Bits2NumInstruction<F: Field> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Bits2NumChipConfig {
+pub struct Bits2NumChipConfig {
     selector: Selector,
     input: Column<Advice>,
     accumulator: Column<Advice>,
@@ -32,20 +32,20 @@ pub(crate) struct Bits2NumChipConfig {
 /// Assembles a vector of bits into a number.
 ///
 /// Bits are assumed to be range-checked already.
-pub(crate) struct Bits2NumChip<F: Field> {
+pub struct Bits2NumChip<F: Field> {
     config: Bits2NumChipConfig,
     _marker: PhantomData<F>,
 }
 
 impl<F: PrimeField> Bits2NumChip<F> {
-    pub(crate) fn construct(config: Bits2NumChipConfig) -> Self {
+    pub fn construct(config: Bits2NumChipConfig) -> Self {
         Bits2NumChip {
             config,
             _marker: PhantomData::default(),
         }
     }
 
-    pub(crate) fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
         accumulator: Column<Advice>,
