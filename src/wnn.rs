@@ -24,8 +24,6 @@ use rand_core::OsRng;
 use crate::gadgets::wnn::{WnnCircuit, WnnCircuitParams};
 
 /// Implementation of a [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural network (WNN).
-///
-/// Implements model inference and proof of inference.
 pub struct Wnn {
     /// Number of classes (e.g. 10 for MNIST)
     num_classes: usize,
@@ -51,35 +49,6 @@ pub struct Wnn {
     binarization_thresholds: Array3<u16>,
 }
 
-/// Implementation of a [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural network (WNN).
-///
-/// Implements model inference and proof of inference.
-///
-/// # Example
-/// ```
-/// use zero_g::io::{image::load_image, model::load_wnn};
-/// use halo2_proofs::poly::{
-///     commitment::ParamsProver, kzg::commitment::ParamsKZG,
-/// };
-/// use std::path::Path;
-///
-/// let img = load_image(&Path::new("benches/example_image_7.png")).unwrap();
-/// let wnn = load_wnn(&Path::new("models/model_28input_256entry_1hash_1bpi.pickle.hdf5")).unwrap();
-/// let k = 12;
-///
-/// // Asserts that all constraints are satisfied
-/// wnn.mock_proof(&img, k);
-///
-/// // Generate keys
-/// let kzg_params = ParamsKZG::new(k);
-/// let pk = wnn.generate_proving_key(&kzg_params);
-///
-/// // Generate proof
-/// let (proof, outputs) = wnn.proof(&pk, &kzg_params, &img);
-///
-/// // Verify proof
-/// wnn.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
-/// ```
 impl Wnn {
     /// Constructs a new WNN.
     /// Instead of calling this function directly, consider using [`crate::load_wnn`].
@@ -164,8 +133,8 @@ impl Wnn {
     /// The index is hashed, split into multiple array indices.
     /// The bloom filter response is true if all of the corresponding
     /// array entries are true.
-    fn bloom_filter_lookup(&self, bloom_array: &[bool], index: u64) -> bool {
-        let hash = self.mish_mash_hash(index);
+    fn bloom_filter_lookup(&self, bloom_array: &[bool], filter_index: u64) -> bool {
+        let hash = self.mish_mash_hash(filter_index);
 
         // Split hash into multiple indices
         let array_indices: Vec<usize> = (0..self.num_filter_hashes)
@@ -205,7 +174,7 @@ impl Wnn {
     }
 
     /// Returns the Halo2 circuit corresponding to this WNN.
-    fn get_circuit(&self, image: &Array2<u8>) -> WnnCircuit<Fp> {
+    pub fn get_circuit(&self, image: &Array2<u8>) -> WnnCircuit<Fp> {
         let params = WnnCircuitParams {
             p: self.p,
             l: self.num_filter_hashes * (self.num_filter_entries as f32).log2() as usize,
@@ -225,14 +194,10 @@ impl Wnn {
     /// Check that the circuit is satisfied for the given image.
     pub fn mock_proof(&self, image: &Array2<u8>, k: u32) {
         let outputs: Vec<Fp> = self.predict(image).into_iter().map(Fp::from).collect();
-
         let circuit = self.get_circuit(image);
 
         let prover = MockProver::run(k, &circuit, vec![outputs]).unwrap();
         prover.assert_satisfied();
-
-        println!("Valid!");
-        circuit.plot("real_wnn_layout.png", k);
     }
 
     fn img_shape(&self) -> (usize, usize) {

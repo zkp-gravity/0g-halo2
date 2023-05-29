@@ -76,6 +76,9 @@ fn main() -> Result<()> {
 
             println!("Verifying constraints...");
             wnn.mock_proof(&img, k);
+            println!("Valid!");
+
+            wnn.get_circuit(&img).plot("real_wnn_layout.png", k);
 
             println!("Proving...");
             wnn.proof_and_verify(&img, k);
