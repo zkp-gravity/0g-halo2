@@ -1,3 +1,5 @@
+//! Utility functions.
+
 use std::ops::Range;
 
 use ff::{PrimeField, PrimeFieldBits};

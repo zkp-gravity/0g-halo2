@@ -1,3 +1,5 @@
+//! Module implementing the a weightless neural network (WNN), with the ability to proof inference.
+
 use std::time::Instant;
 
 use halo2_proofs::{
