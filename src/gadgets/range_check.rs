@@ -123,28 +123,29 @@ impl<F: PrimeFieldBits> RangeCheckConfig<F> {
         }
         Ok(())
     }
+}
 
-    /// Fill a table column with bytes.
-    /// This is only needed if there isn't already a table with all byte values.
-    pub fn load_bytes_column(
-        layouter: &mut impl Layouter<F>,
-        table_column: TableColumn,
-    ) -> Result<(), Error> {
-        layouter.assign_table(
-            || "table_idx",
-            |mut table| {
-                for index in 0..(1 << K) {
-                    table.assign_cell(
-                        || "table_idx",
-                        table_column,
-                        index,
-                        || Value::known(F::from(index as u64)),
-                    )?;
-                }
-                Ok(())
-            },
-        )
-    }
+#[allow(dead_code)]
+/// Fill a table column with bytes.
+/// This is only needed if there isn't already a table with all byte values.
+pub fn load_bytes_column<F: PrimeFieldBits>(
+    layouter: &mut impl Layouter<F>,
+    table_column: TableColumn,
+) -> Result<(), Error> {
+    layouter.assign_table(
+        || "table_idx",
+        |mut table| {
+            for index in 0..(1 << K) {
+                table.assign_cell(
+                    || "table_idx",
+                    table_column,
+                    index,
+                    || Value::known(F::from(index as u64)),
+                )?;
+            }
+            Ok(())
+        },
+    )
 }
 
 #[cfg(test)]
@@ -159,7 +160,7 @@ mod tests {
         plonk::{Advice, Circuit, Column, ConstraintSystem, Error, TableColumn},
     };
 
-    use super::RangeCheckConfig;
+    use super::{load_bytes_column, RangeCheckConfig};
 
     /// Checks that `x <= y`, where `y` is a constant.
     #[derive(Default)]
@@ -218,7 +219,7 @@ mod tests {
                     )
                 },
             )?;
-            RangeCheckConfig::load_bytes_column(&mut layouter, config.table_column)?;
+            load_bytes_column(&mut layouter, config.table_column)?;
             config
                 .range_check_config
                 .le_constant(layouter, x_cell, F::from(self.y))?;
