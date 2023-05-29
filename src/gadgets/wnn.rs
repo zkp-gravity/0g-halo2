@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
+use halo2_proofs::circuit::Value;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
@@ -8,6 +9,7 @@ use halo2_proofs::{
 use ndarray::{array, Array3};
 
 use crate::gadgets::{
+    bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
     bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
     bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
     hash::{HashChip, HashConfig, HashInstructions},
@@ -24,7 +26,7 @@ pub trait WnnInstructions<F: PrimeFieldBits> {
     fn predict(
         &self,
         layouter: impl Layouter<F>,
-        inputs: Vec<F>,
+        inputs: Vec<bool>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 }
 
@@ -39,6 +41,8 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
     hash_chip_config: HashConfig<F>,
     bloom_filter_chip_config: BloomFilterChipConfig,
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
+    bits2num_chip_config: Bits2NumChipConfig,
+    input: Column<Advice>,
 }
 
 /// Implements a BTHOWeN- style weightless neural network.
@@ -49,9 +53,12 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
 ///    (for each input and each class).
 /// 3. The [`ResponseAccumulatorChip`] is used to accumulate the responses.
 struct WnnChip<F: PrimeFieldBits> {
+    bits2num_chip: Bits2NumChip<F>,
     hash_chip: HashChip<F>,
     bloom_filter_chip: BloomFilterChip<F>,
     response_accumulator_chip: ResponseAccumulatorChip<F>,
+
+    config: WnnChipConfig<F>,
 
     n_classes: usize,
     n_inputs: usize,
@@ -65,8 +72,11 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         let n_filters = shape[2];
 
         // Flatten array: from shape (C, N, B) to (C * N, B)
-        let bloom_filter_arrays_flat = bloom_filter_arrays.into_shape((n_classes * n_inputs, n_filters)).unwrap();
+        let bloom_filter_arrays_flat = bloom_filter_arrays
+            .into_shape((n_classes * n_inputs, n_filters))
+            .unwrap();
 
+        let bits2num_chip = Bits2NumChip::construct(config.bits2num_chip_config.clone());
         let hash_chip = HashChip::construct(config.hash_chip_config.clone());
         let bloom_filter_chip = BloomFilterChip::construct(
             config.bloom_filter_chip_config.clone(),
@@ -76,9 +86,13 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             ResponseAccumulatorChip::construct(config.response_accumulator_chip_config.clone());
 
         WnnChip {
+            bits2num_chip,
             hash_chip,
             bloom_filter_chip,
             response_accumulator_chip,
+
+            config,
+
             n_classes,
             n_inputs,
         }
@@ -112,10 +126,16 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         );
         let response_accumulator_chip_config =
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
+
+        let bits2num_chip_config =
+            Bits2NumChip::configure(meta, advice_columns[1], advice_columns[5]);
+
         WnnChipConfig {
             hash_chip_config,
             bloom_filter_chip_config,
             response_accumulator_chip_config,
+            bits2num_chip_config,
+            input: advice_columns[0],
         }
     }
 
@@ -128,13 +148,47 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
     fn predict(
         &self,
         mut layouter: impl Layouter<F>,
-        inputs: Vec<F>,
+        inputs: Vec<bool>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        assert_eq!(self.n_inputs, inputs.len());
+        // Assign the inputs to the first column of the hash chip
 
-        let hashes = inputs
-            .iter()
-            .map(|input| self.hash_chip.hash(layouter.namespace(|| "hash"), *input))
+        let permuted_inputs = layouter.assign_region(
+            || "permuted inputs",
+            |mut region| {
+                let mut permuted_inputs = vec![];
+                for (i, input) in inputs.iter().enumerate() {
+                    let input_cell = region.assign_advice(
+                        || format!("input {}", i),
+                        self.config.input,
+                        i,
+                        || Value::known(F::from(*input as u64)),
+                    )?;
+
+                    permuted_inputs.push(input_cell);
+                }
+                Ok(permuted_inputs)
+            },
+        )?;
+
+        let num_bit_size = self.config.hash_chip_config.hash_function_config.n_bits;
+
+        // Convert the input bits to a group of field element that can be hashed
+        let joint_inputs = permuted_inputs
+            .chunks_exact(num_bit_size)
+            .map(|chunk| {
+                self.bits2num_chip
+                    .convert_le(&mut layouter, Vec::from(chunk))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        assert_eq!(self.n_inputs, joint_inputs.len());
+
+        let hashes = joint_inputs
+            .into_iter()
+            .map(|hash_input| {
+                self.hash_chip
+                    .hash(layouter.namespace(|| "hash"), hash_input)
+            })
             .collect::<Result<Vec<_>, _>>()?;
 
         let mut responses = vec![];
@@ -176,7 +230,7 @@ pub struct WnnCircuitParams {
 }
 
 pub struct WnnCircuit<F: PrimeFieldBits> {
-    inputs: Vec<u64>,
+    inputs: Vec<bool>,
     bloom_filter_arrays: Array3<bool>,
     params: WnnCircuitParams,
     _marker: PhantomData<F>,
@@ -184,7 +238,7 @@ pub struct WnnCircuit<F: PrimeFieldBits> {
 
 impl<F: PrimeFieldBits> WnnCircuit<F> {
     pub fn new(
-        inputs: Vec<u64>,
+        inputs: Vec<bool>,
         bloom_filter_arrays: Array3<bool>,
         params: WnnCircuitParams,
     ) -> Self {
@@ -275,16 +329,13 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl halo2_proofs::circuit::Layouter<F>,
-    ) -> Result<(), halo2_proofs::plonk::Error> {
+        mut layouter: impl Layouter<F>,
+    ) -> Result<(), Error> {
         let mut wnn_chip =
             WnnChip::construct(config.wnn_chip_config, self.bloom_filter_arrays.clone());
         wnn_chip.load(&mut layouter)?;
 
-        let result = wnn_chip.predict(
-            layouter.namespace(|| "wnn"),
-            self.inputs.iter().map(|v| F::from(*v)).collect(),
-        )?;
+        let result = wnn_chip.predict(layouter.namespace(|| "wnn"), self.inputs.clone())?;
 
         for i in 0..result.len() {
             layouter.constrain_instance(result[i].cell(), config.instance_column, i)?;
@@ -318,8 +369,13 @@ mod tests {
     #[test]
     fn test() {
         let k = 13;
-        let input = vec![2117, 30177];
-        // The input numbers hash to the following indices:
+        let input = vec![
+            true, false, true, false, false, false, true, false, false, false, false, true, false,
+            false, false, true, false, false, false, false, true, true, true, true, false, true,
+            false, true, true, true,
+        ];
+        // First, we join the bits into two 15 bit numbers 2117 and 30177
+        // Then joint input numbers hash to the following indices:
         // - 2117 -> (2117^3) % (2^21 - 9) % (1024^2) = 260681
         //   - 260681 % 1024 = 585
         //   - 260681 // 1024 = 254
@@ -350,6 +406,12 @@ mod tests {
     #[test]
     fn plot() {
         let bloom_filter_arrays = Array3::<u8>::ones((2, 2, 1024)).mapv(|_| true);
-        WnnCircuit::<Fp>::new(vec![2, 7], bloom_filter_arrays, PARAMS).plot("wnn-layout.png", 8);
+        // This is the input that will be joint into [2, 7]
+        let inputs = vec![
+            false, true, false, false, false, false, false, false, false, false, false, false,
+            false, false, false, true, true, true, false, false, false, false, false, false, false,
+            false, false, false, false, false,
+        ];
+        WnnCircuit::<Fp>::new(inputs, bloom_filter_arrays, PARAMS).plot("wnn-layout.png", 9);
     }
 }
