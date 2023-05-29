@@ -224,12 +224,7 @@ impl Wnn {
 
     /// Check that the circuit is satisfied for the given image.
     pub fn mock_proof(&self, image: &Array2<u8>, k: u32) {
-        let hash_inputs = self.encode_image(image);
-        let outputs: Vec<Fp> = self
-            .predict(image)
-            .into_iter()
-            .map(|o| Fp::from(o as u64))
-            .collect();
+        let outputs: Vec<Fp> = self.predict(image).into_iter().map(Fp::from).collect();
 
         let circuit = self.get_circuit(image);
 
@@ -266,12 +261,7 @@ impl Wnn {
         kzg_params: &ParamsKZG<Bn256>,
         image: &Array2<u8>,
     ) -> (Vec<u8>, Vec<Fp>) {
-        let hash_inputs = self.encode_image(image);
-        let outputs: Vec<Fp> = self
-            .predict(image)
-            .iter()
-            .map(|o| Fp::from(*o as u64))
-            .collect();
+        let outputs: Vec<Fp> = self.predict(image).into_iter().map(Fp::from).collect();
 
         let circuit = self.get_circuit(image);
 
