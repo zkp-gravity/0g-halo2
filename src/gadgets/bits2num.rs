@@ -5,15 +5,16 @@ use halo2_proofs::poly::Rotation;
 use std::marker::PhantomData;
 
 pub(crate) trait Bits2NumInstruction<F: Field> {
-
-    /// Convert the bits in big endian order to a number
+    /// Convert the bits in big endian order to a number.
+    /// Bits are assumed to already be range-checked.
     fn convert_be(
         &self,
         layouter: &mut impl Layouter<F>,
         bits: Vec<AssignedCell<F, F>>,
     ) -> Result<AssignedCell<F, F>, Error>;
 
-    /// Convert the bits in little endian order to a number
+    /// Convert the bits in little endian order to a number.
+    /// Bits are assumed to already be range-checked.
     fn convert_le(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -21,14 +22,16 @@ pub(crate) trait Bits2NumInstruction<F: Field> {
     ) -> Result<AssignedCell<F, F>, Error>;
 }
 
-
 #[derive(Debug, Clone)]
 pub(crate) struct Bits2NumChipConfig {
-    pub(crate) selector: Selector,
-    pub(crate) input: Column<Advice>,
-    pub(crate) output: Column<Advice>,
+    selector: Selector,
+    input: Column<Advice>,
+    accumulator: Column<Advice>,
 }
 
+/// Assembles a vector of bits into a number.
+///
+/// Bits are assumed to be range-checked already.
 pub(crate) struct Bits2NumChip<F: Field> {
     config: Bits2NumChipConfig,
     _marker: PhantomData<F>,
@@ -45,27 +48,27 @@ impl<F: PrimeField> Bits2NumChip<F> {
     pub(crate) fn configure(
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
-        output: Column<Advice>,
+        accumulator: Column<Advice>,
     ) -> Bits2NumChipConfig {
         let selector = meta.selector();
 
         meta.create_gate("next_num_constraint", |cs| {
             let bit_val = cs.query_advice(input, Rotation::cur());
-            let prev_num_val = cs.query_advice(output, Rotation::cur());
-            let num_val = cs.query_advice(output, Rotation::next());
+            let prev_acc_val = cs.query_advice(accumulator, Rotation::cur());
+            let cur_acc_val = cs.query_advice(accumulator, Rotation::next());
 
             let selector = cs.query_selector(selector);
 
             Constraints::with_selector(
                 selector,
-                vec![num_val - (prev_num_val * F::from(2) + bit_val)],
+                vec![cur_acc_val - (prev_acc_val * F::from(2) + bit_val)],
             )
         });
 
         Bits2NumChipConfig {
             selector,
             input,
-            output,
+            accumulator,
         }
     }
 }
@@ -79,10 +82,8 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
         let res = layouter.assign_region(
             || "bits2num",
             |mut region| {
-
-                let num_bit_size = bits.len();
                 assert!(
-                    num_bit_size as u32 <= F::CAPACITY,
+                    bits.len() as u32 <= F::CAPACITY,
                     "Number of bits is too large for field size!"
                 );
 
@@ -90,19 +91,19 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
 
                 let mut num_val_cell = region.assign_advice_from_constant(
                     || format!("prev_num_val {}", 0),
-                    self.config.output,
+                    self.config.accumulator,
                     0,
                     F::ZERO,
                 )?;
 
-                for i in 0..num_bit_size {
+                for i in 0..bits.len() {
                     self.config.selector.enable(&mut region, i).unwrap();
 
                     num_val = num_val * Value::known(F::from(2)) + bits[i].value();
 
                     num_val_cell = region.assign_advice(
                         || format!("num_val {}", i + 1),
-                        self.config.output,
+                        self.config.accumulator,
                         i + 1,
                         || num_val,
                     )?;
@@ -136,9 +137,7 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
 
 #[cfg(test)]
 mod test {
-    use crate::gadgets::bits2num::{
-        Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction,
-    };
+    use crate::gadgets::bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction};
     use ff::PrimeField;
     use halo2_proofs::circuit::{Layouter, SimpleFloorPlanner, Value};
     use halo2_proofs::dev::MockProver;
@@ -176,19 +175,18 @@ mod test {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-
             let input = meta.advice_column();
-            let output = meta.advice_column();
+            let accumulator = meta.advice_column();
             let constants = meta.fixed_column();
             let pub_input = meta.instance_column();
 
             meta.enable_equality(pub_input);
-            meta.enable_equality(output);
+            meta.enable_equality(accumulator);
             meta.enable_equality(input);
             meta.enable_constant(constants);
 
             Bits2NumCircuitConfig {
-                bits2num_chip_conf: Bits2NumChip::configure(meta, input, output),
+                bits2num_chip_conf: Bits2NumChip::configure(meta, input, accumulator),
                 pub_input,
             }
         }
