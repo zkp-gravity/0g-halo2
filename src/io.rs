@@ -46,7 +46,6 @@ pub fn load_wnn(path: &Path) -> Result<Wnn> {
     let expected_shape = [width, width, bits_per_input];
     let binarization_thresholds = file.dataset("binarization_thresholds")?;
     let binarization_thresholds = binarization_thresholds.read::<f32, Ix3>()?;
-    let binarization_thresholds = binarization_thresholds * 255.0;
     assert_eq!(binarization_thresholds.shape(), expected_shape);
 
     // Quantize binarization thresholds.
