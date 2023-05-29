@@ -6,7 +6,7 @@ use std::{
 use clap::{Parser, Subcommand};
 use hdf5::Result;
 use indicatif::ProgressIterator;
-use zero_g::{load_image, load_wnn, utils::argmax};
+use zero_g::{load_grayscale_image, load_wnn, utils::argmax};
 
 #[derive(Parser)]
 #[clap(name = "Zero G")]
@@ -71,14 +71,14 @@ fn main() -> Result<()> {
             k,
         } => {
             let wnn = load_wnn(&model_path)?;
-            let img = load_image(&img_path).unwrap();
+            let img = load_grayscale_image(&img_path).unwrap();
             println!("Prediction: {:?}", wnn.predict(&img));
 
             println!("Verifying constraints...");
             wnn.mock_proof(&img, k);
             println!("Valid!");
 
-            wnn.get_circuit(&img).plot("real_wnn_layout.png", k);
+            wnn.plot_circuit("real_wnn_layout.png", k);
 
             println!("Proving...");
             wnn.proof_and_verify(&img, k);
@@ -90,7 +90,7 @@ fn main() -> Result<()> {
             img_path,
         } => {
             let wnn = load_wnn(&model_path)?;
-            let img = load_image(&img_path).unwrap();
+            let img = load_grayscale_image(&img_path).unwrap();
             println!("{:?}", wnn.predict(&img));
 
             Ok(())
@@ -106,7 +106,7 @@ fn main() -> Result<()> {
                 let img_path = dir_entry.unwrap().path();
 
                 if let Some(correct_class) = parse_png_file(&img_path) {
-                    let img = load_image(&img_path).unwrap();
+                    let img = load_grayscale_image(&img_path).unwrap();
                     let scores = wnn.predict(&img);
                     let prediction = argmax(&scores);
 

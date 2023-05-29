@@ -275,6 +275,7 @@ impl<F: PrimeFieldBits> WnnCircuit<F> {
         }
     }
 
+    /// Plot the circuit circuit layout, outputting to a particular file.
     pub fn plot(&self, filename: &str, k: u32) {
         use plotters::prelude::*;
 

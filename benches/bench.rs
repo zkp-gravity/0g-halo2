@@ -6,14 +6,14 @@ use halo2_proofs::{
     poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
 };
 use ndarray::Array2;
-use zero_g::{load_image, load_wnn, Wnn};
+use zero_g::{load_grayscale_image, load_wnn, Wnn};
 
 fn setup() -> (Wnn, Array2<u8>, ParamsKZG<Bn256>) {
-    let model_path = PathBuf::from("models/model_28input_256entry_1hash_1bpi.pickle.hdf5");
+    let model_path = PathBuf::from("models/model_28input_256entry_1hash_1bpi.hdf5");
     let img_path = PathBuf::from("benches/example_image_7.png");
 
     let wnn = load_wnn(&model_path).unwrap();
-    let img = load_image(&img_path).unwrap();
+    let img = load_grayscale_image(&img_path).unwrap();
 
     let kzg_params = ParamsKZG::new(12);
 

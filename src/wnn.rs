@@ -174,7 +174,7 @@ impl Wnn {
     }
 
     /// Returns the Halo2 circuit corresponding to this WNN.
-    pub fn get_circuit(&self, image: &Array2<u8>) -> WnnCircuit<Fp> {
+    fn get_circuit(&self, image: &Array2<u8>) -> WnnCircuit<Fp> {
         let params = WnnCircuitParams {
             p: self.p,
             l: self.num_filter_hashes * (self.num_filter_entries as f32).log2() as usize,
@@ -189,6 +189,12 @@ impl Wnn {
             self.input_permutation.clone(),
             params,
         )
+    }
+
+    /// Plots the circuit corresponding to this WNN.
+    pub fn plot_circuit(&self, filename: &str, k: u32) {
+        let image = Array2::zeros(self.img_shape());
+        self.get_circuit(&image).plot(filename, k);
     }
 
     /// Check that the circuit is satisfied for the given image.

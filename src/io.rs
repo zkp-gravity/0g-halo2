@@ -1,3 +1,5 @@
+//! Utilities for loading images and WNNs from disk.
+
 use std::path::Path;
 
 use hdf5::{File, Result};
@@ -7,7 +9,8 @@ use ndarray::{Ix1, Ix3};
 
 use crate::wnn::Wnn;
 
-pub fn load_image(img_path: &Path) -> Result<Array2<u8>, ImageError> {
+/// Loads a grayscale image from disk, returning the first channel.
+pub fn load_grayscale_image(img_path: &Path) -> Result<Array2<u8>, ImageError> {
     let image = image::open(img_path)?.to_rgb8();
     let array: Array3<u8> = Array::from_shape_vec(
         (image.height() as usize, image.width() as usize, 3),
@@ -15,11 +18,10 @@ pub fn load_image(img_path: &Path) -> Result<Array2<u8>, ImageError> {
     )
     .expect("Error converting image to ndarray");
 
-    let array = array.slice_move(s![.., .., 0]);
-
-    Ok(array)
+    Ok(array.slice_move(s![.., .., 0]))
 }
 
+/// Loads a [`Wnn`] from disk, from a file following [this format](https://github.com/zkp-gravity/BTHOWeN-0g/blob/master/output_format_spec.md).
 pub fn load_wnn(path: &Path) -> Result<Wnn> {
     let file = File::open(path)?;
 
