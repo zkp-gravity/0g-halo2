@@ -76,7 +76,7 @@ pub struct WnnChip<F: PrimeFieldBits> {
 }
 
 impl<F: PrimeFieldBits> WnnChip<F> {
-    fn construct(
+    pub fn construct(
         config: WnnChipConfig<F>,
         bloom_filter_arrays: Array3<bool>,
         binarization_thresholds: Array3<u16>,
@@ -121,7 +121,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         }
     }
 
-    fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         advice_columns: [Column<Advice>; 6],
         wnn_config: WnnConfig,
