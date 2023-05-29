@@ -13,7 +13,7 @@ pub fn print_value<F: PrimeFieldBits>(name: &str, value: Value<&F>) {
 }
 
 #[allow(dead_code)]
-pub fn print_values<F: PrimeFieldBits>(name: &str, values: &Vec<Value<F>>) {
+pub fn print_values<F: PrimeFieldBits>(name: &str, values: &[Value<F>]) {
     values.iter().for_each(|value| {
         value.map(|x| println!("{name}: {:#01x}", to_u32(&x)));
     });
@@ -30,7 +30,7 @@ pub fn enable_range<F: PrimeField>(
     Ok(())
 }
 
-pub fn argmax(vec: &Vec<u32>) -> usize {
+pub fn argmax(vec: &[u32]) -> usize {
     let mut index = 0;
     let mut max = 0;
     for (i, x) in vec.iter().enumerate() {
@@ -71,9 +71,9 @@ pub fn to_be_bits<F: PrimeFieldBits>(x: &F, n_bits: usize) -> Vec<bool> {
 
 pub fn from_be_bits<F: PrimeField>(bits: &[bool]) -> F {
     let mut result = F::ZERO;
-    let two = F::from(2 as u64);
+    let two = F::from(2_u64);
     for b in bits.iter() {
-        result = result * two;
+        result *= two;
         if *b {
             result += F::ONE;
         }
@@ -130,12 +130,9 @@ mod tests {
 
     #[test]
     fn test_from_be_bits() {
+        assert_eq!(from_be_bits::<Fp>(&[false, true, true, false]), Fp::from(6));
         assert_eq!(
-            from_be_bits::<Fp>(&vec![false, true, true, false]),
-            Fp::from(6)
-        );
-        assert_eq!(
-            from_be_bits::<Fp>(&vec![
+            from_be_bits::<Fp>(&[
                 false, false, false, true, false, false, false, true, // Byte 1
                 false, false, true, false, false, false, true, false, // Byte 2
                 false, false, true, true, false, false, true, true, // Byte 3

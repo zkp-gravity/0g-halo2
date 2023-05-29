@@ -68,6 +68,7 @@ pub struct Wnn {
 /// wnn.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
 /// ```
 impl Wnn {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         num_classes: usize,
         num_filter_entries: usize,
@@ -180,7 +181,7 @@ impl Wnn {
                         indices
                             .iter()
                             .map(|i| self.bloom_filters[(c, input_index, *i)])
-                            .fold(true, |acc, b| acc && b) as u32
+                            .all(|b| b) as u32
                     })
                     .sum::<u32>()
             })
@@ -200,7 +201,7 @@ impl Wnn {
 
     pub fn mock_proof(&self, image: &Array2<u8>, k: u32) {
         let input_bits = self.encode_image(image);
-        let hash_inputs = self.compute_hash_inputs(input_bits.clone());
+        let hash_inputs = self.compute_hash_inputs(input_bits);
         let outputs: Vec<Fp> = self
             .predict(image)
             .iter()
@@ -209,7 +210,7 @@ impl Wnn {
 
         let circuit = self.get_circuit(hash_inputs);
 
-        let prover = MockProver::run(k, &circuit, vec![outputs.clone()]).unwrap();
+        let prover = MockProver::run(k, &circuit, vec![outputs]).unwrap();
         prover.assert_satisfied();
 
         println!("Valid!");
@@ -227,9 +228,8 @@ impl Wnn {
         let circuit = self.get_circuit(dummy_inputs);
 
         let vk = keygen_vk(kzg_params, &circuit).expect("keygen_vk should not fail");
-        let pk = keygen_pk(kzg_params, vk, &circuit).expect("keygen_pk should not fail");
 
-        pk
+        keygen_pk(kzg_params, vk, &circuit).expect("keygen_pk should not fail")
     }
 
     /// Generate a proof for the given image.
@@ -240,7 +240,7 @@ impl Wnn {
         image: &Array2<u8>,
     ) -> (Vec<u8>, Vec<Fp>) {
         let input_bits = self.encode_image(image);
-        let hash_inputs = self.compute_hash_inputs(input_bits.clone());
+        let hash_inputs = self.compute_hash_inputs(input_bits);
         let outputs: Vec<Fp> = self
             .predict(image)
             .iter()
@@ -252,8 +252,8 @@ impl Wnn {
         let mut transcript: Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>> =
             Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof::<KZGCommitmentScheme<Bn256>, ProverGWC<Bn256>, _, _, _, _>(
-            &kzg_params,
-            &pk,
+            kzg_params,
+            pk,
             &[circuit],
             &[&[outputs.as_ref()]],
             OsRng,
@@ -267,15 +267,15 @@ impl Wnn {
     /// Verify the given proof.
     pub fn verify_proof(
         &self,
-        proof: &Vec<u8>,
+        proof: &[u8],
         kzg_params: &ParamsKZG<Bn256>,
         vk: &VerifyingKey<G1Affine>,
         outputs: &Vec<Fp>,
     ) {
-        let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        let strategy = SingleStrategy::new(&kzg_params);
+        let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(proof);
+        let strategy = SingleStrategy::new(kzg_params);
         verify_proof::<_, VerifierGWC<Bn256>, _, _, _>(
-            &kzg_params,
+            kzg_params,
             vk,
             strategy.clone(),
             &[&[outputs.as_ref()]],

@@ -65,7 +65,9 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         let n_filters = shape[2];
 
         // Flatten array: from shape (C, N, B) to (C * N, B)
-        let bloom_filter_arrays_flat = bloom_filter_arrays.into_shape((n_classes * n_inputs, n_filters)).unwrap();
+        let bloom_filter_arrays_flat = bloom_filter_arrays
+            .into_shape((n_classes * n_inputs, n_filters))
+            .unwrap();
 
         let hash_chip = HashChip::construct(config.hash_chip_config.clone());
         let bloom_filter_chip = BloomFilterChip::construct(
@@ -73,7 +75,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             &bloom_filter_arrays_flat,
         );
         let response_accumulator_chip =
-            ResponseAccumulatorChip::construct(config.response_accumulator_chip_config.clone());
+            ResponseAccumulatorChip::construct(config.response_accumulator_chip_config);
 
         WnnChip {
             hash_chip,
@@ -108,7 +110,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             advice_columns[3],
             advice_columns[4],
             lookup_range_check_config,
-            wnn_config.hash_function_config.clone(),
+            wnn_config.hash_function_config,
         );
         let response_accumulator_chip_config =
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
@@ -286,8 +288,8 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
             self.inputs.iter().map(|v| F::from(*v)).collect(),
         )?;
 
-        for i in 0..result.len() {
-            layouter.constrain_instance(result[i].cell(), config.instance_column, i)?;
+        for (i, score) in result.iter().enumerate() {
+            layouter.constrain_instance(score.cell(), config.instance_column, i)?;
         }
 
         Ok(())

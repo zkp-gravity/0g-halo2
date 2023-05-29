@@ -60,7 +60,7 @@ pub struct ByteSelectorChipConfig {
 ///   - The sum of the byte selectors (computed via the `selector_acc` column) must be 1.
 ///   - When the selector is 1, the `lookup_index` must be equal to the `byte_index`.
 /// - Finally, the `byte_acc` column is used to to propagate the selected byte to the last cell.
-/// 
+///
 /// Note that this implicitly range-checks `lookup_index` to be in `[0, num_bytes)`.
 #[derive(Debug, Clone)]
 pub struct ByteSelectorChip<F: PrimeFieldBits> {
@@ -76,6 +76,7 @@ impl<F: PrimeFieldBits> ByteSelectorChip<F> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         byte_decomposition: Column<Advice>,
@@ -98,7 +99,7 @@ impl<F: PrimeFieldBits> ByteSelectorChip<F> {
             // => a_i = z_i - 2^8⋅z_{i + 1}
             let z_cur = meta.query_advice(byte_decomposition, Rotation::cur());
             let z_next = meta.query_advice(byte_decomposition, Rotation::next());
-            z_cur.clone() - z_next * F::from(1 << 8)
+            z_cur - z_next * F::from(1 << 8)
         };
 
         meta.lookup("byte_decomposition", |meta| {

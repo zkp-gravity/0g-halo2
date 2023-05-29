@@ -118,7 +118,7 @@ impl<F: PrimeFieldBits> BitSelectorChip<F> {
             vec![
                 (lookup_selector.clone() * byte, byte_column),
                 (lookup_selector.clone() * index, index_column),
-                (lookup_selector.clone() * bit, bit_column),
+                (lookup_selector * bit, bit_column),
             ]
         });
 
