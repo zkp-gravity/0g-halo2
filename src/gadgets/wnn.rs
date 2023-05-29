@@ -1,3 +1,5 @@
+//! Implementation of a gadget & circuit implementing a [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural network (WNN).
+
 use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
@@ -22,6 +24,7 @@ use crate::gadgets::{
 
 use super::encode_image::{EncodeImageChip, EncodeImageChipConfig, EncodeImageInstructions};
 
+/// Instructions for the [`WnnChip`].
 pub trait WnnInstructions<F: PrimeFieldBits> {
     /// Given an input vector, predicts the score for each class.
     fn predict(
@@ -31,10 +34,11 @@ pub trait WnnInstructions<F: PrimeFieldBits> {
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 }
 
+/// Configuration of the WNN.
 #[derive(Debug, Clone)]
-struct WnnConfig {
-    hash_function_config: HashFunctionConfig,
-    bloom_filter_config: BloomFilterConfig,
+pub struct WnnConfig {
+    pub hash_function_config: HashFunctionConfig,
+    pub bloom_filter_config: BloomFilterConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -56,7 +60,7 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
 /// 5. The [`BloomFilterChip`] is used to look up the bloom filter responses
 ///    (for each input and each class).
 /// 6. The [`ResponseAccumulatorChip`] is used to accumulate the responses.
-struct WnnChip<F: PrimeFieldBits> {
+pub struct WnnChip<F: PrimeFieldBits> {
     encode_image_chip: EncodeImageChip<F>,
     bits2num_chip: Bits2NumChip<F>,
     hash_chip: HashChip<F>,
@@ -72,7 +76,7 @@ struct WnnChip<F: PrimeFieldBits> {
 }
 
 impl<F: PrimeFieldBits> WnnChip<F> {
-    fn construct(
+    pub fn construct(
         config: WnnChipConfig<F>,
         bloom_filter_arrays: Array3<bool>,
         binarization_thresholds: Array3<u16>,
@@ -117,7 +121,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         }
     }
 
-    fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         advice_columns: [Column<Advice>; 6],
         wnn_config: WnnConfig,
@@ -150,7 +154,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             advice_columns[3],
             advice_columns[4],
             lookup_range_check_config,
-            wnn_config.hash_function_config.clone(),
+            wnn_config.hash_function_config,
         );
         let response_accumulator_chip_config =
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
@@ -248,6 +252,7 @@ pub struct WnnCircuitParams {
     pub bits_per_filter: usize,
 }
 
+/// A circuit using [`WnnChip`] to predict the class of an (secret) image.
 pub struct WnnCircuit<F: PrimeFieldBits> {
     image: Array2<u8>,
     bloom_filter_arrays: Array3<bool>,
@@ -275,6 +280,7 @@ impl<F: PrimeFieldBits> WnnCircuit<F> {
         }
     }
 
+    /// Plot the circuit circuit layout, outputting to a particular file.
     pub fn plot(&self, filename: &str, k: u32) {
         use plotters::prelude::*;
 
@@ -368,8 +374,8 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
 
         let result = wnn_chip.predict(layouter.namespace(|| "wnn"), &self.image)?;
 
-        for i in 0..result.len() {
-            layouter.constrain_instance(result[i].cell(), config.instance_column, i)?;
+        for (i, score) in result.iter().enumerate() {
+            layouter.constrain_instance(score.cell(), config.instance_column, i)?;
         }
 
         Ok(())

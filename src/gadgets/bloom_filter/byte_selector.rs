@@ -76,6 +76,7 @@ impl<F: PrimeFieldBits> ByteSelectorChip<F> {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         byte_decomposition: Column<Advice>,
@@ -98,7 +99,7 @@ impl<F: PrimeFieldBits> ByteSelectorChip<F> {
             // => a_i = z_i - 2^8⋅z_{i + 1}
             let z_cur = meta.query_advice(byte_decomposition, Rotation::cur());
             let z_next = meta.query_advice(byte_decomposition, Rotation::next());
-            z_cur.clone() - z_next * F::from(1 << 8)
+            z_cur - z_next * F::from(1 << 8)
         };
 
         meta.lookup("byte_decomposition", |meta| {

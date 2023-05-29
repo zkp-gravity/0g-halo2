@@ -93,7 +93,7 @@ impl<F: PrimeFieldBits> BloomFilterChip<F> {
         let byte_selector_chip =
             ByteSelectorChip::<F>::construct(config.byte_selector_config.clone());
         let bit_selector_chip = BitSelectorChip::<F>::construct(config.bit_selector_config.clone());
-        let and_bits_chip = AndBitsChip::<F>::construct(config.and_bits_config.clone());
+        let and_bits_chip = AndBitsChip::<F>::construct(config.and_bits_config);
 
         Self {
             array_lookup_chip,

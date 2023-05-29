@@ -4,7 +4,7 @@ use halo2_proofs::plonk::{Advice, Column, ConstraintSystem, Constraints, Error, 
 use halo2_proofs::poly::Rotation;
 use std::marker::PhantomData;
 
-pub(crate) trait Bits2NumInstruction<F: Field> {
+pub trait Bits2NumInstruction<F: Field> {
     /// Convert the bits in big endian order to a number.
     /// Bits are assumed to already be range-checked.
     fn convert_be(
@@ -23,7 +23,7 @@ pub(crate) trait Bits2NumInstruction<F: Field> {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct Bits2NumChipConfig {
+pub struct Bits2NumChipConfig {
     selector: Selector,
     input: Column<Advice>,
     accumulator: Column<Advice>,
@@ -32,20 +32,20 @@ pub(crate) struct Bits2NumChipConfig {
 /// Assembles a vector of bits into a number.
 ///
 /// Bits are assumed to be range-checked already.
-pub(crate) struct Bits2NumChip<F: Field> {
+pub struct Bits2NumChip<F: Field> {
     config: Bits2NumChipConfig,
     _marker: PhantomData<F>,
 }
 
 impl<F: PrimeField> Bits2NumChip<F> {
-    pub(crate) fn construct(config: Bits2NumChipConfig) -> Self {
+    pub fn construct(config: Bits2NumChipConfig) -> Self {
         Bits2NumChip {
             config,
             _marker: PhantomData::default(),
         }
     }
 
-    pub(crate) fn configure(
+    pub fn configure(
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
         accumulator: Column<Advice>,
@@ -79,7 +79,7 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
         layouter: &mut impl Layouter<F>,
         bits: Vec<AssignedCell<F, F>>,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let res = layouter.assign_region(
+        layouter.assign_region(
             || "bits2num",
             |mut region| {
                 assert!(
@@ -96,10 +96,10 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
                     F::ZERO,
                 )?;
 
-                for i in 0..bits.len() {
+                for (i, bit_cell) in bits.iter().enumerate() {
                     self.config.selector.enable(&mut region, i).unwrap();
 
-                    num_val = num_val * Value::known(F::from(2)) + bits[i].value();
+                    num_val = num_val * Value::known(F::from(2)) + bit_cell.value();
 
                     num_val_cell = region.assign_advice(
                         || format!("num_val {}", i + 1),
@@ -118,9 +118,7 @@ impl<F: PrimeField> Bits2NumInstruction<F> for Bits2NumChip<F> {
 
                 Ok(num_val_cell)
             },
-        );
-
-        res
+        )
     }
 
     fn convert_le(
@@ -224,7 +222,7 @@ mod test {
                 BiteMode::LE => bit2num.convert_le(&mut layouter, assigned_input)?,
             };
 
-            layouter.constrain_instance(res.cell(), config.pub_input.clone(), 0)?;
+            layouter.constrain_instance(res.cell(), config.pub_input, 0)?;
 
             Ok(())
         }
@@ -236,7 +234,7 @@ mod test {
         let input = vec![true, false, true, false];
 
         let circuit = Bits2NumTestCircuit {
-            input: input.clone(),
+            input,
             params,
             mode: BiteMode::BE,
         };
@@ -254,7 +252,7 @@ mod test {
         let input = vec![true, false, true, false];
 
         let circuit = Bits2NumTestCircuit {
-            input: input.clone(),
+            input,
             params,
             mode: BiteMode::LE,
         };

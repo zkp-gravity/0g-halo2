@@ -11,6 +11,11 @@ use halo2_proofs::{
 
 use crate::utils::to_u32;
 
+pub struct GreaterThanWitnessResult<F: PrimeFieldBits> {
+    pub x_cell: AssignedCell<F, F>,
+    pub gt_cell: AssignedCell<F, F>,
+}
+
 pub trait GreaterThanInstructions<F: PrimeFieldBits> {
     /// Computes whether `x > y` by witnessing `x` and treating `y` as a constant.
     /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` us a public constant).
@@ -20,7 +25,7 @@ pub trait GreaterThanInstructions<F: PrimeFieldBits> {
         layouter: &mut impl Layouter<F>,
         x: F,
         y: F,
-    ) -> Result<(AssignedCell<F, F>, AssignedCell<F, F>), Error>;
+    ) -> Result<GreaterThanWitnessResult<F>, Error>;
 
     /// Computes whether `x > y` by copying `x` from an existing cell and treating `y` as a constant.
     /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` us a public constant).
@@ -159,13 +164,13 @@ impl<F: PrimeFieldBits> GreaterThanInstructions<F> for GreaterThanChip<F> {
         layouter: &mut impl Layouter<F>,
         x: F,
         y: F,
-    ) -> Result<(AssignedCell<F, F>, AssignedCell<F, F>), Error> {
+    ) -> Result<GreaterThanWitnessResult<F>, Error> {
         layouter.assign_region(
             || "greater_than_witness",
             |mut region| {
                 let x_cell = region.assign_advice(|| "x", self.config.x, 0, || Value::known(x))?;
-                let result_cell = self.greater_than(&mut region, &x_cell, y)?;
-                Ok((x_cell, result_cell))
+                let gt_cell = self.greater_than(&mut region, &x_cell, y)?;
+                Ok(GreaterThanWitnessResult { x_cell, gt_cell })
             },
         )
     }
@@ -259,13 +264,13 @@ mod tests {
         ) -> Result<(), Error> {
             load_bytes_column(&mut layouter, config.table_column)?;
             let greater_than_chip = GreaterThanChip::construct(config.greater_than_config);
-            let (_, result) = greater_than_chip.greater_than_witness(
+            let result = greater_than_chip.greater_than_witness(
                 &mut layouter,
                 F::from(self.x),
                 F::from(self.y),
             )?;
 
-            layouter.constrain_instance(result.cell(), config.instance, 0)?;
+            layouter.constrain_instance(result.gt_cell.cell(), config.instance, 0)?;
             Ok(())
         }
     }

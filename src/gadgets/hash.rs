@@ -68,6 +68,7 @@ pub struct HashChip<F: PrimeFieldBits> {
 }
 
 impl<F: PrimeFieldBits> HashChip<F> {
+    #[allow(clippy::too_many_arguments)]
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         input: Column<Advice>,
@@ -125,6 +126,7 @@ impl<F: PrimeFieldBits> HashChip<F> {
         HashChip { config }
     }
 
+    #[allow(clippy::type_complexity)]
     fn compute_hash(
         &self,
         mut layouter: impl Layouter<F>,
