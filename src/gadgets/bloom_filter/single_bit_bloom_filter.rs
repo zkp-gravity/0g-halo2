@@ -1,4 +1,6 @@
 //! Contains an all-in one bloom filter gadget that uses table lookups to look up single bits.
+//! Not currently used.
+#![allow(dead_code)]
 use std::marker::PhantomData;
 
 use crate::utils::{decompose_word_be, to_u32};

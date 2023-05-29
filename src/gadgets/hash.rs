@@ -54,12 +54,13 @@ pub struct HashConfig<F: PrimeFieldBits> {
 /// The following constraints are checked:
 /// - `x^3 = quotient * p + remainder`
 /// - `remainder = msb * 2^l + hash`
-/// - `x` is in [0, 2^n_bits)
 /// - `quotient` is in [0, 2^(3 * n_bits - l))
 /// - `msb` is in 0 or 1
 /// - `remainder` is in [0, p)
 ///
-/// Note that the `hash` column is not range-checked to be in [0, 2^l).
+/// Note that `x` is **not** range-checked. This is assumed to happen
+/// elsewhere in the circuit.
+/// Also note that the `hash` column is not range-checked to be in [0, 2^l).
 /// This is assumed to happen elsewhere in the circuit.
 #[derive(Debug, Clone)]
 pub struct HashChip<F: PrimeFieldBits> {
@@ -177,19 +178,15 @@ impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
         mut layouter: impl Layouter<F>,
         input: AssignedCell<F, F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let (input, quotient, remainder, msb, output) =
+        let (_input, quotient, remainder, msb, output) =
             self.compute_hash(layouter.namespace(|| "hash"), input)?;
 
         let HashFunctionConfig { p, l, n_bits } = self.config.hash_function_config;
 
-        // Check that all cells have the right number of bits, with two exceptions:
+        // Check that all cells have the right number of bits, with three exceptions:
+        // - The input is assumed to already be range-checked
         // - output should be l bits, but it's later decomposed and used in a table lookup, which enforces the range
         // - remainder should be l + 1 bits, but does not need to be range-checked, because we verify that r = 2^l * msb + output
-        self.config.range_check_config.range_check(
-            layouter.namespace(|| "range check input"),
-            input,
-            n_bits,
-        )?;
         self.config.range_check_config.range_check(
             layouter.namespace(|| "range check quotient"),
             quotient,
@@ -225,7 +222,7 @@ mod tests {
         plonk::{Circuit, Column, Instance, TableColumn},
     };
 
-    use crate::gadgets::range_check::RangeCheckConfig;
+    use crate::gadgets::range_check::{load_bytes_column, RangeCheckConfig};
 
     use super::{HashChip, HashConfig, HashFunctionConfig, HashInstructions};
 
@@ -312,7 +309,7 @@ mod tests {
                 },
             )?;
 
-            RangeCheckConfig::<F>::load_bytes_column(&mut layouter, config.table_column)?;
+            load_bytes_column(&mut layouter, config.table_column)?;
             let hash_chip = HashChip::construct(config.hash_config);
             let hash_value = hash_chip.hash(layouter.namespace(|| "hash"), assigned_input)?;
 
@@ -371,18 +368,6 @@ mod tests {
         let output = Fp::from(0);
         let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
         prover.assert_satisfied();
-    }
-
-    #[test]
-    fn test_256_too_large() {
-        let k = 9;
-        let circuit = MyCircuit::<Fp> {
-            input: 256,
-            _marker: PhantomData,
-        };
-        let output = Fp::from(0);
-        let prover = MockProver::run(k, &circuit, vec![vec![output]]).unwrap();
-        assert!(prover.verify().is_err());
     }
 
     #[test]
