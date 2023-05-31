@@ -3,14 +3,14 @@
 //! # Example
 //! ```
 //! use std::path::Path;
-//! use zero_g::{load_grayscale_image, load_wnn};
+//! use zero_g::{checked_in_test_data::*, load_grayscale_image, load_wnn};
 //! use halo2_proofs::poly::{
 //!     commitment::ParamsProver, kzg::commitment::ParamsKZG,
 //! };
 //!
-//! let img = load_grayscale_image(Path::new("benches/example_image_7.png")).unwrap();
-//! let wnn = load_wnn(Path::new("models/model_28input_256entry_1hash_1bpi.hdf5")).unwrap();
-//! let k = 12;
+//! let img = load_grayscale_image(Path::new(TEST_IMG_PATH)).unwrap();
+//! let (k, model_path) = MNIST_TINY;
+//! let wnn = load_wnn(Path::new(model_path)).unwrap();
 //!
 //! // Asserts that all constraints are satisfied
 //! wnn.mock_proof(&img, k);
@@ -33,3 +33,11 @@ pub mod wnn;
 
 pub use io::{load_grayscale_image, load_wnn};
 pub use wnn::Wnn;
+
+pub mod checked_in_test_data {
+    pub const TEST_IMG_PATH: &str = "benches/example_image_7.png";
+    pub const MNIST_TINY: (u32, &str) = (12, "models/model_28input_256entry_1hash_1bpi.hdf5");
+    pub const MNIST_SMALL: (u32, &str) = (15, "models/model_28input_1024entry_2hash_2bpi.hdf5");
+    pub const MNIST_MEDIUM: (u32, &str) = (15, "models/model_28input_2048entry_2hash_3bpi.hdf5");
+    pub const MNIST_LARGE: (u32, &str) = (17, "models/model_49input_8192entry_4hash_6bpi.hdf5");
+}
