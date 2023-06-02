@@ -1,6 +1,10 @@
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
     dev::MockProver,
+    halo2curves::{
+        bn256::{Bn256, Fq, Fr, G1Affine},
+        ff::Field,
+    },
     plonk::{
         create_proof, keygen_pk, keygen_vk, verify_proof, Advice, Circuit, Column,
         ConstraintSystem, Error, Fixed, Instance, ProvingKey, VerifyingKey,
@@ -15,10 +19,6 @@ use halo2_proofs::{
         Rotation, VerificationStrategy,
     },
     transcript::{TranscriptReadBuffer, TranscriptWriterBuffer},
-};
-use halo2curves::{
-    bn256::{Bn256, Fq, Fr, G1Affine},
-    ff::Field,
 };
 use itertools::Itertools;
 use rand::{rngs::OsRng, RngCore};
