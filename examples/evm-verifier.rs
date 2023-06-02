@@ -28,7 +28,7 @@ use snark_verifier::{
     system::halo2::{compile, transcript::evm::EvmTranscript, Config},
     verifier::{self, SnarkVerifier},
 };
-use std::{env, path::Path, rc::Rc};
+use std::{env, fs, path::Path, rc::Rc};
 use zero_g::{
     checked_in_test_data::{MNIST_TINY, TEST_IMG_PATH},
     load_grayscale_image, load_wnn,
@@ -208,12 +208,19 @@ fn gen_evm_verifier(
     params: &ParamsKZG<Bn256>,
     vk: &VerifyingKey<G1Affine>,
     num_instance: Vec<usize>,
+    name: &str,
 ) -> Vec<u8> {
     let protocol = compile(
         params,
         vk,
         Config::kzg().with_num_instance(num_instance.clone()),
     );
+
+    println!(
+        "Verification key: Number of fixed commitments: {}",
+        vk.fixed_commitments().len()
+    );
+
     let vk = (params.get_g()[0], params.g2(), params.s_g2()).into();
 
     let loader = EvmLoader::new::<Fq, Fr>();
@@ -224,7 +231,15 @@ fn gen_evm_verifier(
     let proof = PlonkVerifier::read_proof(&vk, &protocol, &instances, &mut transcript).unwrap();
     PlonkVerifier::verify(&vk, &protocol, &instances, &proof).unwrap();
 
-    evm::compile_yul(&loader.yul_code())
+    let yul_code = loader.yul_code();
+
+    fs::write(format!("verifier_{name}.yul"), &yul_code).unwrap();
+
+    let bytecode = evm::compile_yul(&yul_code);
+
+    println!("Byte code size: {}", bytecode.len());
+
+    bytecode
 }
 
 fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {
@@ -235,23 +250,30 @@ fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>)
             .build();
 
         let caller = Address::from_low_u64_be(0xfe);
-        let verifier = evm
-            .deploy(caller, deployment_code.into(), 0.into())
-            .address
-            .unwrap();
-        let result = evm.call_raw(caller, verifier, calldata.into(), 0.into());
+        let deployment_result = evm.deploy(caller, deployment_code.into(), 0.into());
 
-        dbg!(result.gas_used);
+        let verifier = deployment_result.address;
+        match verifier {
+            Some(verifier) => {
+                let result = evm.call_raw(caller, verifier, calldata.into(), 0.into());
 
-        !result.reverted
+                dbg!(result.gas_used);
+
+                !result.reverted
+            }
+            None => {
+                println!("Deployment result: {:?}", deployment_result.exit_reason);
+                false
+            }
+        }
     };
     assert!(success);
 }
 
-fn validate_evm<C: Circuit<Fr> + Clone>(circuit: C, instances: Vec<Vec<Fr>>, k: u32) {
+fn validate_evm<C: Circuit<Fr> + Clone>(circuit: C, instances: Vec<Vec<Fr>>, k: u32, name: &str) {
     let params = gen_srs(k);
     let pk = gen_pk(&params, &circuit);
-    let deployment_code = gen_evm_verifier(&params, pk.get_vk(), vec![instances[0].len()]);
+    let deployment_code = gen_evm_verifier(&params, pk.get_vk(), vec![instances[0].len()], name);
 
     let proof = gen_proof(&params, &pk, circuit.clone(), instances.clone());
     evm_verify(deployment_code, instances.clone(), proof);
@@ -268,13 +290,13 @@ fn main() {
 
         let outputs: Vec<Fr> = wnn.predict(&image).into_iter().map(Fr::from).collect();
         let instances = vec![outputs];
-        validate_evm(circuit, instances, k)
+        validate_evm(circuit, instances, k, &args[1])
     } else if args[1] == "plonk" {
         let circuit = StandardPlonk::rand(OsRng);
         let instances = circuit.instances();
         let k = 8;
 
-        validate_evm(circuit, instances, k)
+        validate_evm(circuit, instances, k, &args[1])
     } else {
         panic!("Unknown circuit: {:?}", args[1]);
     }
