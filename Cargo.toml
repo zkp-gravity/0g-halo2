@@ -20,7 +20,6 @@ halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2", 
 ] }
 halo2_gadgets = { git = "https://github.com/privacy-scaling-explorations/halo2", tag = "v2023_04_20" }
 
-snark-verifier = { git = "https://github.com/privacy-scaling-explorations/snark-verifier", tag = "v2023_04_20" }
 plotters = { version = "0.3.0" }
 num-bigint = "0.4.3"
 hdf5 = "0.8.1"
@@ -30,6 +29,9 @@ rand_core = "0.6.4"
 image = "0.24.6"
 clap = { version = "4.2.7", features = ["derive"] }
 indicatif = "0.17.3"
+
+# For the evm-verifier example
+snark-verifier = { git = "https://github.com/privacy-scaling-explorations/snark-verifier", tag = "v2023_04_20" }
 rand = "0.8.5"
 itertools = "0.10.5"
 
