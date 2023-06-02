@@ -253,6 +253,7 @@ pub struct WnnCircuitParams {
 }
 
 /// A circuit using [`WnnChip`] to predict the class of an (secret) image.
+#[derive(Clone)]
 pub struct WnnCircuit<F: PrimeFieldBits> {
     image: Array2<u8>,
     bloom_filter_arrays: Array3<bool>,

@@ -7,15 +7,19 @@ edition = "2021"
 name = "zero_g"
 path = "src/lib.rs"
 
+[patch.'https://github.com/privacy-scaling-explorations/halo2curves']
+# We need version 0.3.3 of halo2curves, specifically the changes of: https://github.com/privacy-scaling-explorations/halo2curves/pull/40
+# Since it is backward-compatible to version 0.3.2 (which is used by halo2), we can patch it here.
+# Once halo2_proofs, halo2_gadgets and snark-verifier update to the next version of halo2curves, we can remove this patch.
+halo2curves = { git = 'https://github.com/privacy-scaling-explorations//halo2curves', tag = "0.3.3" }
+
 [dependencies]
-# For now, we use a fork of PSE's Halo2 which uses a more recent version of halo2curves.
-# With the next halo2curves release, we can open a PR to halo2, see:
-# https://github.com/privacy-scaling-explorations/halo2curves/pull/45
-halo2_proofs = { git = "https://github.com/georgwiese/halo2.git", branch = "update-halo2curves", package = "halo2_proofs", features = [
+halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2", tag = "v2023_04_20", features = [
     "dev-graph",
     "circuit-params",
 ] }
-halo2_gadgets = { git = "https://github.com/georgwiese/halo2.git", branch = "update-halo2curves", package = "halo2_gadgets" }
+halo2_gadgets = { git = "https://github.com/privacy-scaling-explorations/halo2", tag = "v2023_04_20" }
+
 plotters = { version = "0.3.0" }
 num-bigint = "0.4.3"
 hdf5 = "0.8.1"
@@ -25,6 +29,11 @@ rand_core = "0.6.4"
 image = "0.24.6"
 clap = { version = "4.2.7", features = ["derive"] }
 indicatif = "0.17.3"
+
+# For the evm-verifier example
+snark-verifier = { git = "https://github.com/privacy-scaling-explorations/snark-verifier", tag = "v2023_04_20" }
+rand = "0.8.5"
+itertools = "0.10.5"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }

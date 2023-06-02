@@ -176,7 +176,7 @@ impl Wnn {
     }
 
     /// Returns the Halo2 circuit corresponding to this WNN.
-    fn get_circuit(&self, image: &Array2<u8>) -> WnnCircuit<Fp> {
+    pub fn get_circuit(&self, image: &Array2<u8>) -> WnnCircuit<Fp> {
         let params = WnnCircuitParams {
             p: self.p,
             l: self.num_filter_hashes * (self.num_filter_entries as f32).log2() as usize,
