@@ -348,11 +348,6 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
         let constants = meta.fixed_column();
         meta.enable_constant(constants);
 
-        // Sometimes, one column of constants is not enough
-        // (Especially with the "V1" floor planner, as it packs more efficiently)
-        let constants2 = meta.fixed_column();
-        meta.enable_constant(constants2);
-
         let bloom_filter_config = BloomFilterConfig {
             n_hashes: params.n_hashes,
             bits_per_hash: params.bits_per_hash,
