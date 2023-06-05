@@ -20,7 +20,7 @@ pub trait GreaterThanInstructions<F: PrimeFieldBits> {
     fn greater_than_witness(
         &self,
         layouter: impl Layouter<F>,
-        x: F,
+        x: Value<F>,
         y: F,
     ) -> Result<GreaterThanWitnessResult<F>, Error>;
 
@@ -133,13 +133,13 @@ impl<F: PrimeFieldBits> GreaterThanInstructions<F> for GreaterThanChip<F> {
     fn greater_than_witness(
         &self,
         mut layouter: impl Layouter<F>,
-        x: F,
+        x: Value<F>,
         y: F,
     ) -> Result<GreaterThanWitnessResult<F>, Error> {
         let (x_cell, diff_cell, gt_cell) = layouter.assign_region(
             || "greater_than_witness",
             |mut region| {
-                let x_cell = region.assign_advice(|| "x", self.config.x, 0, || Value::known(x))?;
+                let x_cell = region.assign_advice(|| "x", self.config.x, 0, || x)?;
                 let (diff_cell, result_cell) = self.greater_than(&mut region, &x_cell, y)?;
                 Ok((x_cell, diff_cell, result_cell))
             },
@@ -195,7 +195,7 @@ mod tests {
 
     use ff::{Field, PrimeFieldBits};
     use halo2_proofs::{
-        circuit::{Layouter, SimpleFloorPlanner},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr as Fp,
         plonk::{Circuit, Column, ConstraintSystem, Error, Instance, TableColumn},
@@ -266,7 +266,7 @@ mod tests {
             let greater_than_chip = GreaterThanChip::construct(config.greater_than_config);
             let result = greater_than_chip.greater_than_witness(
                 layouter.namespace(|| "greater_than"),
-                F::from(self.x),
+                Value::known(F::from(self.x)),
                 F::from(self.y),
             )?;
 

@@ -6,7 +6,7 @@ use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
 use halo2_proofs::{
-    circuit::{Layouter, SimpleFloorPlanner},
+    circuit::{Layouter, SimpleFloorPlanner, Value},
     plonk::{Circuit, Column, ConstraintSystem, Error, Instance},
 };
 use ndarray::{Array1, Array2, Array3};
@@ -32,7 +32,7 @@ pub struct WnnCircuitParams {
     pub bits_per_filter: usize,
 }
 pub struct WnnCircuit<F: PrimeFieldBits> {
-    image: Array2<u8>,
+    image: Value<Array2<u8>>,
     bloom_filter_arrays: Array3<bool>,
     binarization_thresholds: Array3<u16>,
     input_permutation: Array1<u64>,
@@ -49,7 +49,7 @@ impl<F: PrimeFieldBits> WnnCircuit<F> {
         params: WnnCircuitParams,
     ) -> Self {
         Self {
-            image,
+            image: Value::known(image),
             bloom_filter_arrays,
             binarization_thresholds,
             input_permutation,
@@ -130,7 +130,7 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
         );
         wnn_chip.load(&mut layouter)?;
 
-        let result = wnn_chip.predict(layouter.namespace(|| "wnn"), &self.image)?;
+        let result = wnn_chip.predict(layouter.namespace(|| "wnn"), self.image.clone())?;
 
         for (i, score) in result.iter().enumerate() {
             layouter.constrain_instance(score.cell(), config.instance_column, i)?;

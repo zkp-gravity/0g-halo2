@@ -2,9 +2,10 @@ use std::collections::BTreeMap;
 
 use ff::PrimeFieldBits;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error},
 };
+use itertools::Itertools;
 use ndarray::{Array2, Array3};
 
 use crate::gadgets::greater_than::GreaterThanWitnessResult;
@@ -19,7 +20,7 @@ pub trait EncodeImageInstructions<F: PrimeFieldBits> {
     fn encode_image(
         &self,
         layouter: impl Layouter<F>,
-        image: &Array2<u8>,
+        image: Value<Array2<u8>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 }
 
@@ -75,9 +76,15 @@ impl<F: PrimeFieldBits> EncodeImageInstructions<F> for EncodeImageChip<F> {
     fn encode_image(
         &self,
         mut layouter: impl Layouter<F>,
-        image: &Array2<u8>,
+        image: Value<Array2<u8>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        let (width, height) = (image.shape()[0], image.shape()[1]);
+        let width = self.binarization_thresholds.shape()[0];
+        let height = self.binarization_thresholds.shape()[1];
+
+        // Turn Value<Array2<u8>> into Vec<Value<u8>>
+        let image_flat = image
+            .map(|image| image.clone().into_iter().collect_vec())
+            .transpose_vec(width * height);
 
         let mut intensity_cells: BTreeMap<(usize, usize), AssignedCell<F, F>> = BTreeMap::new();
         let mut bit_cells = vec![];
@@ -112,12 +119,14 @@ impl<F: PrimeFieldBits> EncodeImageInstructions<F> for EncodeImageChip<F> {
 
                         match intensity_cells.get(&(i, j)) {
                             None => {
+                                let image_value =
+                                    image_flat[i * height + j].map(|x| F::from(x as u64));
                                 // For the first cell, we want to remember the intensity cell, so that we can
                                 // add a copy constraint for the other thresholds.
                                 let GreaterThanWitnessResult { x_cell, gt_cell } =
                                     self.greater_than_chip.greater_than_witness(
                                         layouter.namespace(|| format!("gt[{}, {}]", i, j)),
-                                        F::from(image[(i, j)] as u64),
+                                        image_value,
                                         t,
                                     )?;
                                 intensity_cells.insert((i, j), x_cell);

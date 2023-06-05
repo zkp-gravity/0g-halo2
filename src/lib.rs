@@ -36,8 +36,8 @@ pub use wnn::Wnn;
 
 pub mod checked_in_test_data {
     pub const TEST_IMG_PATH: &str = "benches/example_image_7.png";
-    pub const MNIST_TINY: (u32, &str) = (14, "models/model_28input_256entry_1hash_1bpi.hdf5");
+    pub const MNIST_TINY: (u32, &str) = (13, "models/model_28input_256entry_1hash_1bpi.hdf5");
     pub const MNIST_SMALL: (u32, &str) = (15, "models/model_28input_1024entry_2hash_2bpi.hdf5");
-    pub const MNIST_MEDIUM: (u32, &str) = (16, "models/model_28input_2048entry_2hash_3bpi.hdf5");
+    pub const MNIST_MEDIUM: (u32, &str) = (15, "models/model_28input_2048entry_2hash_3bpi.hdf5");
     pub const MNIST_LARGE: (u32, &str) = (17, "models/model_49input_8192entry_4hash_6bpi.hdf5");
 }

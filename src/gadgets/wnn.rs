@@ -4,10 +4,10 @@ use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
+    circuit::{floor_planner::V1, AssignedCell, Layouter, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
 };
-use ndarray::{array, Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3};
 
 use crate::gadgets::{
     bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
@@ -30,7 +30,7 @@ pub trait WnnInstructions<F: PrimeFieldBits> {
     fn predict(
         &self,
         layouter: impl Layouter<F>,
-        image: &Array2<u8>,
+        image: Value<Array2<u8>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 }
 
@@ -133,7 +133,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         );
         let lookup_range_check_config = RangeCheckConfig::configure(
             meta,
-            advice_columns[3],
+            advice_columns[5],
             // Re-use byte column of the bloom filter
             bloom_filter_chip_config.byte_column,
         );
@@ -159,7 +159,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
 
         let bits2num_chip_config =
-            Bits2NumChip::configure(meta, advice_columns[4], advice_columns[5]);
+            Bits2NumChip::configure(meta, advice_columns[3], advice_columns[4]);
 
         WnnChipConfig {
             encode_image_chip_config,
@@ -179,7 +179,7 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
     fn predict(
         &self,
         mut layouter: impl Layouter<F>,
-        image: &Array2<u8>,
+        image: Value<Array2<u8>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let bit_cells = self
             .encode_image_chip
@@ -254,7 +254,7 @@ pub struct WnnCircuitParams {
 /// A circuit using [`WnnChip`] to predict the class of an (secret) image.
 #[derive(Clone)]
 pub struct WnnCircuit<F: PrimeFieldBits> {
-    image: Array2<u8>,
+    image: Value<Array2<u8>>,
     bloom_filter_arrays: Array3<bool>,
     binarization_thresholds: Array3<u16>,
     input_permutation: Array1<u64>,
@@ -271,7 +271,7 @@ impl<F: PrimeFieldBits> WnnCircuit<F> {
         params: WnnCircuitParams,
     ) -> Self {
         Self {
-            image,
+            image: Value::known(image),
             bloom_filter_arrays,
             binarization_thresholds,
             input_permutation,
@@ -302,15 +302,15 @@ impl Default for WnnCircuitParams {
 
 impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
     type Config = WnnCircuitConfig<F>;
-    type FloorPlanner = SimpleFloorPlanner;
+    type FloorPlanner = V1;
     type Params = WnnCircuitParams;
 
     fn without_witnesses(&self) -> Self {
         Self {
-            image: array![[]],
-            bloom_filter_arrays: array![[[]]],
-            binarization_thresholds: array![[[]]],
-            input_permutation: array![],
+            image: Value::unknown(),
+            bloom_filter_arrays: self.bloom_filter_arrays.clone(),
+            binarization_thresholds: self.binarization_thresholds.clone(),
+            input_permutation: self.input_permutation.clone(),
             params: self.params.clone(),
             _marker: PhantomData,
         }
@@ -339,6 +339,11 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
 
         let constants = meta.fixed_column();
         meta.enable_constant(constants);
+
+        // Sometimes, one column of constants is not enough
+        // (Especially with the "V1" floor planner, as it packs more efficiently)
+        let constants2 = meta.fixed_column();
+        meta.enable_constant(constants2);
 
         let bloom_filter_config = BloomFilterConfig {
             n_hashes: params.n_hashes,
@@ -372,7 +377,7 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
         );
         wnn_chip.load(&mut layouter)?;
 
-        let result = wnn_chip.predict(layouter.namespace(|| "wnn"), &self.image)?;
+        let result = wnn_chip.predict(layouter.namespace(|| "wnn"), self.image.clone())?;
 
         for (i, score) in result.iter().enumerate() {
             layouter.constrain_instance(score.cell(), config.instance_column, i)?;
