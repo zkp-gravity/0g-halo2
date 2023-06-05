@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
 use halo2_proofs::{
-    circuit::{floor_planner::V1, AssignedCell, Layouter, Value},
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
 };
 use ndarray::{Array1, Array2, Array3};
@@ -302,7 +302,15 @@ impl Default for WnnCircuitParams {
 
 impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
     type Config = WnnCircuitConfig<F>;
-    type FloorPlanner = V1;
+
+    // The V1 floor planner could be used for fewer number of rows,
+    // but unfortunately, it has aproving time overhead of ~30%.
+    // Also, it rarely leads to smaller values of `k` in practice,
+    // so we stick with SimpleFloorPlanner for now.
+    // In principle, there is no good reason for a proving time overhead
+    // of floor planning, and there are plans to get rid of it:
+    // https://github.com/zcash/halo2/issues/643
+    type FloorPlanner = SimpleFloorPlanner;
     type Params = WnnCircuitParams;
 
     fn without_witnesses(&self) -> Self {
