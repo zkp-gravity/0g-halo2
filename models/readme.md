@@ -8,7 +8,7 @@ To update the models, follow the steps in the `BTHOWeN-0g` readme, then copy the
 cp ../BTHOWeN/software_model/models/MNIST/*.hdf5 models/
 ```
 
-### "MNIST-Tiny": `model_28input_256entry_1hash_1bpi` (k = 12)
+### "MNIST-Tiny": `model_28input_256entry_1hash_1bpi` (k = 14)
 
 A very small toy model, used in the tests and the benchmark.
 Accuracy on the MNIST test set is 83.06%.

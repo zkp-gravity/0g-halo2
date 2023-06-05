@@ -1,14 +1,11 @@
-use std::marker::PhantomData;
-
 use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, Region, Value},
-    plonk::{
-        Advice, Column, ConstraintSystem, Constraints, Error, Expression, Selector, TableColumn,
-    },
+    plonk::{Advice, Column, ConstraintSystem, Constraints, Error, Expression, Selector},
     poly::Rotation,
 };
 
+use super::range_check::RangeCheckConfig;
 use crate::utils::to_u32;
 
 pub struct GreaterThanWitnessResult<F: PrimeFieldBits> {
@@ -18,39 +15,41 @@ pub struct GreaterThanWitnessResult<F: PrimeFieldBits> {
 
 pub trait GreaterThanInstructions<F: PrimeFieldBits> {
     /// Computes whether `x > y` by witnessing `x` and treating `y` as a constant.
-    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` us a public constant).
+    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` is a public constant).
     /// Returns the assigned cell for `x` and the result (0 or 1).
     fn greater_than_witness(
         &self,
-        layouter: &mut impl Layouter<F>,
-        x: F,
+        layouter: impl Layouter<F>,
+        x: Value<F>,
         y: F,
     ) -> Result<GreaterThanWitnessResult<F>, Error>;
 
     /// Computes whether `x > y` by copying `x` from an existing cell and treating `y` as a constant.
-    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` us a public constant).
+    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this should be enforced on whatever
+    /// cell it's copied from; `y` is a public constant).
     /// Returns the assigned cell with the result (0 or 1).
     fn greater_than_copy(
         &self,
-        layouter: &mut impl Layouter<F>,
+        layouter: impl Layouter<F>,
         x: &AssignedCell<F, F>,
         y: F,
     ) -> Result<AssignedCell<F, F>, Error>;
 }
 
 #[derive(Debug, Clone)]
-pub struct GreaterThanChipConfig {
+pub struct GreaterThanChipConfig<F: PrimeFieldBits> {
     x: Column<Advice>,
     y: Column<Advice>,
     diff: Column<Advice>,
     is_gt: Column<Advice>,
     selector: Selector,
+
+    range_check_config: RangeCheckConfig<F>,
 }
 
 #[derive(Debug, Clone)]
 pub struct GreaterThanChip<F: PrimeFieldBits> {
-    config: GreaterThanChipConfig,
-    _marker: PhantomData<F>,
+    config: GreaterThanChipConfig<F>,
 }
 
 /// Implements greater-than.
@@ -61,16 +60,13 @@ pub struct GreaterThanChip<F: PrimeFieldBits> {
 /// | b (copy or witness) | t (constant) | 256 * is_gt + t - b | b > t |
 ///
 /// The following constraints are enforced:
-/// - x is a byte (via a lookup table)
-/// - diff is a byte (via a lookup table)
-/// - is_gt is a bit
+/// - x is a byte (if witnessed, via RangeCheckConfig)
+/// - diff is a byte (via RangeCheckConfig)
+/// - is_gt is a bit (via RangeCheckConfig)
 /// - x + diff = 256 * is_gt + y
 impl<F: PrimeFieldBits> GreaterThanChip<F> {
-    pub fn construct(config: GreaterThanChipConfig) -> Self {
-        Self {
-            config,
-            _marker: PhantomData,
-        }
+    pub fn construct(config: GreaterThanChipConfig<F>) -> Self {
+        Self { config }
     }
 
     pub fn configure(
@@ -79,36 +75,9 @@ impl<F: PrimeFieldBits> GreaterThanChip<F> {
         y: Column<Advice>,
         diff: Column<Advice>,
         is_gt: Column<Advice>,
-        byte_column: TableColumn,
-    ) -> GreaterThanChipConfig {
-        let selector = meta.complex_selector();
-
-        meta.lookup("x is byte", |meta| {
-            let selector = meta.query_selector(selector);
-
-            let x = meta.query_advice(x, Rotation::cur());
-
-            vec![(selector * x, byte_column)]
-        });
-
-        meta.lookup("diff is byte", |meta| {
-            let selector = meta.query_selector(selector);
-
-            let diff = meta.query_advice(diff, Rotation::cur());
-
-            vec![(selector * diff, byte_column)]
-        });
-
-        meta.create_gate("is_gt is bit", |meta| {
-            let selector = meta.query_selector(selector);
-
-            let is_gt = meta.query_advice(is_gt, Rotation::cur());
-
-            Constraints::with_selector(
-                selector,
-                vec![is_gt.clone() * (is_gt - Expression::Constant(F::ONE))],
-            )
-        });
+        range_check_config: RangeCheckConfig<F>,
+    ) -> GreaterThanChipConfig<F> {
+        let selector = meta.selector();
 
         meta.create_gate("x + diff = 256 * is_gt + y", |meta| {
             let selector = meta.query_selector(selector);
@@ -129,15 +98,17 @@ impl<F: PrimeFieldBits> GreaterThanChip<F> {
             diff,
             is_gt,
             selector,
+            range_check_config,
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn greater_than(
         &self,
         region: &mut Region<F>,
         x: &AssignedCell<F, F>,
         y: F,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<(AssignedCell<F, F>, AssignedCell<F, F>), Error> {
         if to_u32(&y) > 255 {
             panic!("y must be less than 256!");
         }
@@ -153,41 +124,70 @@ impl<F: PrimeFieldBits> GreaterThanChip<F> {
         self.config.selector.enable(region, 0)?;
 
         region.assign_advice_from_constant(|| "y", self.config.y, 0, y)?;
-        region.assign_advice(|| "diff", self.config.diff, 0, || diff)?;
-        region.assign_advice(|| "gt", self.config.is_gt, 0, || greater_than)
+        let diff_cell = region.assign_advice(|| "diff", self.config.diff, 0, || diff)?;
+        let gt_cell = region.assign_advice(|| "gt", self.config.is_gt, 0, || greater_than)?;
+
+        Ok((diff_cell, gt_cell))
     }
 }
 
 impl<F: PrimeFieldBits> GreaterThanInstructions<F> for GreaterThanChip<F> {
     fn greater_than_witness(
         &self,
-        layouter: &mut impl Layouter<F>,
-        x: F,
+        mut layouter: impl Layouter<F>,
+        x: Value<F>,
         y: F,
     ) -> Result<GreaterThanWitnessResult<F>, Error> {
-        layouter.assign_region(
+        let (x_cell, diff_cell, gt_cell) = layouter.assign_region(
             || "greater_than_witness",
             |mut region| {
-                let x_cell = region.assign_advice(|| "x", self.config.x, 0, || Value::known(x))?;
-                let gt_cell = self.greater_than(&mut region, &x_cell, y)?;
-                Ok(GreaterThanWitnessResult { x_cell, gt_cell })
+                let x_cell = region.assign_advice(|| "x", self.config.x, 0, || x)?;
+                let (diff_cell, result_cell) = self.greater_than(&mut region, &x_cell, y)?;
+                Ok((x_cell, diff_cell, result_cell))
             },
-        )
+        )?;
+        self.config.range_check_config.range_check(
+            layouter.namespace(|| "range_check_x"),
+            x_cell.clone(),
+            8,
+        )?;
+        self.config.range_check_config.range_check(
+            layouter.namespace(|| "range_check_gt"),
+            gt_cell.clone(),
+            1,
+        )?;
+        self.config.range_check_config.range_check(
+            layouter.namespace(|| "range_check_diff"),
+            diff_cell,
+            8,
+        )?;
+        Ok(GreaterThanWitnessResult { x_cell, gt_cell })
     }
 
     fn greater_than_copy(
         &self,
-        layouter: &mut impl Layouter<F>,
+        mut layouter: impl Layouter<F>,
         x: &AssignedCell<F, F>,
         y: F,
     ) -> Result<AssignedCell<F, F>, Error> {
-        layouter.assign_region(
+        let (diff_cell, result_cell) = layouter.assign_region(
             || "greater_than_copy",
             |mut region| {
                 let x_cell = x.copy_advice(|| "x", &mut region, self.config.x, 0)?;
                 self.greater_than(&mut region, &x_cell, y)
             },
-        )
+        )?;
+        self.config.range_check_config.range_check(
+            layouter.namespace(|| "range_check_gt"),
+            result_cell.clone(),
+            1,
+        )?;
+        self.config.range_check_config.range_check(
+            layouter.namespace(|| "range_check_diff"),
+            diff_cell,
+            8,
+        )?;
+        Ok(result_cell)
     }
 }
 
@@ -197,13 +197,13 @@ mod tests {
 
     use ff::{Field, PrimeFieldBits};
     use halo2_proofs::{
-        circuit::{Layouter, SimpleFloorPlanner},
+        circuit::{Layouter, SimpleFloorPlanner, Value},
         dev::MockProver,
         halo2curves::bn256::Fr as Fp,
         plonk::{Circuit, Column, ConstraintSystem, Error, Instance, TableColumn},
     };
 
-    use crate::gadgets::range_check::load_bytes_column;
+    use crate::gadgets::range_check::{load_bytes_column, RangeCheckConfig};
 
     use super::{GreaterThanChip, GreaterThanChipConfig, GreaterThanInstructions};
 
@@ -216,14 +216,14 @@ mod tests {
     }
 
     #[derive(Clone, Debug)]
-    struct Config {
-        greater_than_config: GreaterThanChipConfig,
-        table_column: TableColumn,
+    struct Config<F: PrimeFieldBits> {
+        greater_than_config: GreaterThanChipConfig<F>,
+        byte_column: TableColumn,
         instance: Column<Instance>,
     }
 
     impl<F: PrimeFieldBits> Circuit<F> for MyCircuit<F> {
-        type Config = Config;
+        type Config = Config<F>;
         type FloorPlanner = SimpleFloorPlanner;
         type Params = ();
 
@@ -237,22 +237,24 @@ mod tests {
             let diff = meta.advice_column();
             let is_gt = meta.advice_column();
 
-            let table_column = meta.lookup_table_column();
+            let byte_column = meta.lookup_table_column();
             let constants = meta.fixed_column();
             let instance = meta.instance_column();
 
             meta.enable_equality(x);
             meta.enable_equality(y);
+            meta.enable_equality(diff);
             meta.enable_equality(is_gt);
             meta.enable_equality(instance);
             meta.enable_constant(constants);
 
-            let range_check_config =
-                GreaterThanChip::configure(meta, x, y, diff, is_gt, table_column);
+            let range_check_config = RangeCheckConfig::configure(meta, x, byte_column);
+            let greater_than_config =
+                GreaterThanChip::configure(meta, x, y, diff, is_gt, range_check_config);
 
             Config {
-                greater_than_config: range_check_config,
-                table_column,
+                greater_than_config,
+                byte_column,
                 instance,
             }
         }
@@ -262,11 +264,11 @@ mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            load_bytes_column(&mut layouter, config.table_column)?;
+            load_bytes_column(&mut layouter, config.byte_column)?;
             let greater_than_chip = GreaterThanChip::construct(config.greater_than_config);
             let result = greater_than_chip.greater_than_witness(
-                &mut layouter,
-                F::from(self.x),
+                layouter.namespace(|| "greater_than"),
+                Value::known(F::from(self.x)),
                 F::from(self.y),
             )?;
 

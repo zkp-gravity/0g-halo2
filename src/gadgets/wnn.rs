@@ -4,10 +4,10 @@ use std::marker::PhantomData;
 
 use ff::PrimeFieldBits;
 use halo2_proofs::{
-    circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
+    circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
 };
-use ndarray::{array, Array1, Array2, Array3};
+use ndarray::{Array1, Array2, Array3};
 
 use crate::gadgets::{
     bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
@@ -30,7 +30,7 @@ pub trait WnnInstructions<F: PrimeFieldBits> {
     fn predict(
         &self,
         layouter: impl Layouter<F>,
-        image: &Array2<u8>,
+        image: Value<Array2<u8>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 }
 
@@ -43,7 +43,7 @@ pub struct WnnConfig {
 
 #[derive(Clone, Debug)]
 pub struct WnnChipConfig<F: PrimeFieldBits> {
-    encode_image_chip_config: EncodeImageChipConfig,
+    encode_image_chip_config: EncodeImageChipConfig<F>,
     bits2num_chip_config: Bits2NumChipConfig,
     hash_chip_config: HashConfig<F>,
     bloom_filter_chip_config: BloomFilterChipConfig,
@@ -131,20 +131,19 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             advice_columns,
             wnn_config.bloom_filter_config.clone(),
         );
+        let lookup_range_check_config = RangeCheckConfig::configure(
+            meta,
+            advice_columns[5],
+            // Re-use byte column of the bloom filter
+            bloom_filter_chip_config.byte_column,
+        );
         let encode_image_chip_config = EncodeImageChip::configure(
             meta,
             advice_columns[0],
             advice_columns[1],
             advice_columns[2],
             advice_columns[3],
-            // Re-use byte column of the bloom filter
-            bloom_filter_chip_config.byte_column,
-        );
-        let lookup_range_check_config = RangeCheckConfig::configure(
-            meta,
-            advice_columns[5],
-            // Re-use byte column of the bloom filter
-            bloom_filter_chip_config.byte_column,
+            lookup_range_check_config.clone(),
         );
         let hash_chip_config = HashChip::configure(
             meta,
@@ -160,7 +159,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             ResponseAccumulatorChip::configure(meta, advice_columns[0..5].try_into().unwrap());
 
         let bits2num_chip_config =
-            Bits2NumChip::configure(meta, advice_columns[4], advice_columns[5]);
+            Bits2NumChip::configure(meta, advice_columns[3], advice_columns[4]);
 
         WnnChipConfig {
             encode_image_chip_config,
@@ -180,7 +179,7 @@ impl<F: PrimeFieldBits> WnnInstructions<F> for WnnChip<F> {
     fn predict(
         &self,
         mut layouter: impl Layouter<F>,
-        image: &Array2<u8>,
+        image: Value<Array2<u8>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let bit_cells = self
             .encode_image_chip
@@ -255,7 +254,7 @@ pub struct WnnCircuitParams {
 /// A circuit using [`WnnChip`] to predict the class of an (secret) image.
 #[derive(Clone)]
 pub struct WnnCircuit<F: PrimeFieldBits> {
-    image: Array2<u8>,
+    image: Value<Array2<u8>>,
     bloom_filter_arrays: Array3<bool>,
     binarization_thresholds: Array3<u16>,
     input_permutation: Array1<u64>,
@@ -272,7 +271,7 @@ impl<F: PrimeFieldBits> WnnCircuit<F> {
         params: WnnCircuitParams,
     ) -> Self {
         Self {
-            image,
+            image: Value::known(image),
             bloom_filter_arrays,
             binarization_thresholds,
             input_permutation,
@@ -303,15 +302,23 @@ impl Default for WnnCircuitParams {
 
 impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
     type Config = WnnCircuitConfig<F>;
+
+    // The V1 floor planner could be used for fewer number of rows,
+    // but unfortunately, it has aproving time overhead of ~30%.
+    // Also, it rarely leads to smaller values of `k` in practice,
+    // so we stick with SimpleFloorPlanner for now.
+    // In principle, there is no good reason for a proving time overhead
+    // of floor planning, and there are plans to get rid of it:
+    // https://github.com/zcash/halo2/issues/643
     type FloorPlanner = SimpleFloorPlanner;
     type Params = WnnCircuitParams;
 
     fn without_witnesses(&self) -> Self {
         Self {
-            image: array![[]],
-            bloom_filter_arrays: array![[[]]],
-            binarization_thresholds: array![[[]]],
-            input_permutation: array![],
+            image: Value::unknown(),
+            bloom_filter_arrays: self.bloom_filter_arrays.clone(),
+            binarization_thresholds: self.binarization_thresholds.clone(),
+            input_permutation: self.input_permutation.clone(),
             params: self.params.clone(),
             _marker: PhantomData,
         }
@@ -373,7 +380,7 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
         );
         wnn_chip.load(&mut layouter)?;
 
-        let result = wnn_chip.predict(layouter.namespace(|| "wnn"), &self.image)?;
+        let result = wnn_chip.predict(layouter.namespace(|| "wnn"), self.image.clone())?;
 
         for (i, score) in result.iter().enumerate() {
             layouter.constrain_instance(score.cell(), config.instance_column, i)?;

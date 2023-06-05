@@ -29,10 +29,7 @@ use snark_verifier::{
     verifier::{self, SnarkVerifier},
 };
 use std::{env, fs, path::Path, rc::Rc};
-use zero_g::{
-    checked_in_test_data::{MNIST_TINY, TEST_IMG_PATH},
-    load_grayscale_image, load_wnn,
-};
+use zero_g::{checked_in_test_data::*, load_grayscale_image, load_wnn};
 
 type PlonkVerifier = verifier::plonk::PlonkVerifier<KzgAs<Bn256, Gwc19>>;
 
@@ -271,18 +268,23 @@ fn evm_verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>)
 }
 
 fn validate_evm<C: Circuit<Fr> + Clone>(circuit: C, instances: Vec<Vec<Fr>>, k: u32, name: &str) {
+    println!("Generating Params...");
     let params = gen_srs(k);
+    println!("Generating PK...");
     let pk = gen_pk(&params, &circuit);
+    println!("Generating deployment code...");
     let deployment_code = gen_evm_verifier(&params, pk.get_vk(), vec![instances[0].len()], name);
 
+    println!("Generating proof...");
     let proof = gen_proof(&params, &pk, circuit.clone(), instances.clone());
+    println!("Verifying proof...");
     evm_verify(deployment_code, instances.clone(), proof);
 }
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args[1] == "wnn" {
-        let (k, model_path) = MNIST_TINY;
+        let (k, model_path) = MNIST_MEDIUM;
 
         let wnn = load_wnn(Path::new(model_path)).unwrap();
         let image = load_grayscale_image(Path::new(TEST_IMG_PATH)).unwrap();
