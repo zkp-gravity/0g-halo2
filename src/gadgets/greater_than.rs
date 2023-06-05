@@ -101,6 +101,7 @@ impl<F: PrimeFieldBits> GreaterThanChip<F> {
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn greater_than(
         &self,
         region: &mut Region<F>,
@@ -156,7 +157,7 @@ impl<F: PrimeFieldBits> GreaterThanInstructions<F> for GreaterThanChip<F> {
         )?;
         self.config.range_check_config.range_check(
             layouter.namespace(|| "range_check_diff"),
-            diff_cell.clone(),
+            diff_cell,
             8,
         )?;
         Ok(GreaterThanWitnessResult { x_cell, gt_cell })
@@ -182,7 +183,7 @@ impl<F: PrimeFieldBits> GreaterThanInstructions<F> for GreaterThanChip<F> {
         )?;
         self.config.range_check_config.range_check(
             layouter.namespace(|| "range_check_diff"),
-            diff_cell.clone(),
+            diff_cell,
             8,
         )?;
         Ok(result_cell)

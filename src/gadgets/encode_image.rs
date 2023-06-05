@@ -83,7 +83,7 @@ impl<F: PrimeFieldBits> EncodeImageInstructions<F> for EncodeImageChip<F> {
 
         // Turn Value<Array2<u8>> into Vec<Value<u8>>
         let image_flat = image
-            .map(|image| image.clone().into_iter().collect_vec())
+            .map(|image| image.into_iter().collect_vec())
             .transpose_vec(width * height);
 
         let mut intensity_cells: BTreeMap<(usize, usize), AssignedCell<F, F>> = BTreeMap::new();
