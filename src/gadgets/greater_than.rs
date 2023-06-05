@@ -15,7 +15,7 @@ pub struct GreaterThanWitnessResult<F: PrimeFieldBits> {
 
 pub trait GreaterThanInstructions<F: PrimeFieldBits> {
     /// Computes whether `x > y` by witnessing `x` and treating `y` as a constant.
-    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` us a public constant).
+    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` is a public constant).
     /// Returns the assigned cell for `x` and the result (0 or 1).
     fn greater_than_witness(
         &self,
@@ -25,7 +25,8 @@ pub trait GreaterThanInstructions<F: PrimeFieldBits> {
     ) -> Result<GreaterThanWitnessResult<F>, Error>;
 
     /// Computes whether `x > y` by copying `x` from an existing cell and treating `y` as a constant.
-    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this is enforced; `y` us a public constant).
+    /// Note that both `x` and `y` are assumed to be bytes (on `x`, this should be enforced on whatever
+    /// cell it's copied from; `y` is a public constant).
     /// Returns the assigned cell with the result (0 or 1).
     fn greater_than_copy(
         &self,
@@ -59,9 +60,9 @@ pub struct GreaterThanChip<F: PrimeFieldBits> {
 /// | b (copy or witness) | t (constant) | 256 * is_gt + t - b | b > t |
 ///
 /// The following constraints are enforced:
-/// - x is a byte (via a lookup table)
-/// - diff is a byte (via a lookup table)
-/// - is_gt is a bit
+/// - x is a byte (if witnessed, via RangeCheckConfig)
+/// - diff is a byte (via RangeCheckConfig)
+/// - is_gt is a bit (via RangeCheckConfig)
 /// - x + diff = 256 * is_gt + y
 impl<F: PrimeFieldBits> GreaterThanChip<F> {
     pub fn construct(config: GreaterThanChipConfig<F>) -> Self {
