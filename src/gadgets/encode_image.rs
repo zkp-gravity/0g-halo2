@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter},
-    plonk::{Advice, Column, ConstraintSystem, Error, TableColumn},
+    plonk::{Advice, Column, ConstraintSystem, Error},
 };
 use ndarray::{Array2, Array3};
 
@@ -60,11 +60,10 @@ impl<F: PrimeFieldBits> EncodeImageChip<F> {
         y: Column<Advice>,
         diff: Column<Advice>,
         is_gt: Column<Advice>,
-        byte_column: TableColumn,
         range_check_config: RangeCheckConfig<F>,
     ) -> EncodeImageChipConfig<F> {
         let greater_than_chip_config =
-            GreaterThanChip::configure(meta, x, y, diff, is_gt, byte_column, range_check_config);
+            GreaterThanChip::configure(meta, x, y, diff, is_gt, range_check_config);
         EncodeImageChipConfig {
             advice_column: is_gt,
             greater_than_chip_config,

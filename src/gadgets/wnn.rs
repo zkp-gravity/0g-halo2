@@ -143,8 +143,6 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             advice_columns[1],
             advice_columns[2],
             advice_columns[3],
-            // Re-use byte column of the bloom filter
-            bloom_filter_chip_config.byte_column,
             lookup_range_check_config.clone(),
         );
         let hash_chip_config = HashChip::configure(
