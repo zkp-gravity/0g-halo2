@@ -2,6 +2,10 @@
 name = "zero_g"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
+description = "zk-SNARKs for weightless neural networks (WNNs)."
+repository = "https://github.com/zkp-gravity/0g-halo2"
+readme = "README.md"
 
 [lib]
 name = "zero_g"

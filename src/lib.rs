@@ -1,6 +1,12 @@
 //! Imlements zk-SNARKs for [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural networks (WNNs).
 //!
-//! # Example
+//! **Disclaimer**: This code has not been audited and is not intended for production use.
+//!
+//! This library can be used to create standalone proofs of inference for any model trained with
+//! [zkp-gravity/BTHOWeN-0g](https://github.com/zkp-gravity/BTHOWeN-0g) (see below).
+//! You might also want to integrate the [gadgets::wnn::WnnChip] into your Halo2 circuit.
+//!
+//! # Example: Proving inference on an image file
 //! ```
 //! use std::path::Path;
 //! use zero_g::{checked_in_test_data::*, load_grayscale_image, load_wnn};
