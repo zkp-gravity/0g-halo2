@@ -5,7 +5,7 @@ use std::{env, path::Path};
 use zero_g::{
     checked_in_test_data::*,
     eth::{
-        deploy::{evm_deploy, evm_verify},
+        deploy::{deploy_contract, spawn_anvil, submit_proof, verify},
         gen_evm_verifier, gen_pk, gen_proof, gen_srs,
         vanilla_plonk_circuit::StandardPlonk,
     },
@@ -30,11 +30,18 @@ async fn validate_evm<C: Circuit<Fr> + Clone>(
     let proof = gen_proof(&params, &pk, circuit.clone(), instances.clone());
 
     println!("Verifying proof...");
-    evm_verify(deployment_code.clone(), instances.clone(), proof.clone());
+    verify(deployment_code.clone(), instances.clone(), proof.clone());
 
     if deploy {
+        println!("Spawning Anvil...");
+        let (anvil, wallet) = spawn_anvil();
         println!("Deploying...");
-        evm_deploy(deployment_code, instances.clone(), proof)
+        let contract_address = deploy_contract(deployment_code, anvil.endpoint(), wallet.clone())
+            .await
+            .unwrap();
+
+        println!("Submitting proof...");
+        submit_proof(instances, proof, anvil.endpoint(), wallet, contract_address)
             .await
             .unwrap();
     }
