@@ -8,15 +8,10 @@ use halo2_proofs::{
     plonk::VerifyingKey,
     poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
 };
-use rand::rngs::OsRng;
 use std::{env, path::Path, str::FromStr};
 use zero_g::{
     checked_in_test_data::*,
-    eth::{
-        deploy::{deploy_contract, dry_run_verifier, submit_proof},
-        gen_evm_verifier,
-        vanilla_plonk_circuit::StandardPlonk,
-    },
+    eth::{deploy_contract, dry_run_verifier, gen_evm_verifier, submit_proof},
     load_grayscale_image, load_wnn,
 };
 
@@ -65,36 +60,22 @@ async fn validate_evm(
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
-    if args[1] == "wnn" {
-        let (k, model_path) = MNIST_MEDIUM;
+    let (k, model_path) = MNIST_MEDIUM;
 
-        let wnn = load_wnn(Path::new(model_path)).unwrap();
-        let image = load_grayscale_image(Path::new(TEST_IMG_PATH)).unwrap();
+    let wnn = load_wnn(Path::new(model_path)).unwrap();
+    let image = load_grayscale_image(Path::new(TEST_IMG_PATH)).unwrap();
 
-        let kzg_params = ParamsKZG::<Bn256>::new(k);
-        let pk = wnn.generate_proving_key(&kzg_params);
-        let (proof, instance_column) = wnn.proof(&pk, &kzg_params, &image);
+    let kzg_params = ParamsKZG::<Bn256>::new(k);
+    let pk = wnn.generate_proving_key(&kzg_params);
+    let (proof, instance_column) = wnn.proof(&pk, &kzg_params, &image);
 
-        validate_evm(
-            kzg_params,
-            pk.get_vk(),
-            proof,
-            vec![instance_column],
-            args.get(2),
-        )
-        .await;
-    } else if args[1] == "plonk" {
-        let circuit = StandardPlonk::rand(OsRng);
-        let instances = circuit.instances();
-        let k = 8;
-
-        let kzg_params = ParamsKZG::<Bn256>::new(k);
-        let pk = circuit.gen_pk(&kzg_params);
-        let proof = circuit.gen_proof(&kzg_params, &pk, instances.clone());
-
-        validate_evm(kzg_params, pk.get_vk(), proof, instances, args.get(2)).await;
-    } else {
-        panic!("Unknown circuit: {:?}", args[1]);
-    }
+    validate_evm(
+        kzg_params,
+        pk.get_vk(),
+        proof,
+        vec![instance_column],
+        args.get(1),
+    )
+    .await;
     Ok(())
 }
