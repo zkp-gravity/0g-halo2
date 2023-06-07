@@ -13,7 +13,7 @@ use halo2_proofs::{
             strategy::SingleStrategy,
         },
     },
-    transcript::{Blake2bRead, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer},
+    transcript::{TranscriptReadBuffer, TranscriptWriterBuffer},
 };
 use ndarray::{s, Array1, Array2, Array3};
 
@@ -267,16 +267,15 @@ impl Wnn {
         vk: &VerifyingKey<G1Affine>,
         outputs: &Vec<Fp>,
     ) {
-        let transcript = Blake2bRead::<_, _, Challenge255<_>>::init(proof);
-        let strategy = SingleStrategy::new(kzg_params);
-        verify_proof::<_, VerifierGWC<Bn256>, _, _, _>(
-            kzg_params,
+        let mut transcript = TranscriptReadBuffer::<_, G1Affine, _>::init(proof);
+        verify_proof::<_, VerifierGWC<_>, _, EvmTranscript<_, _, _, _>, _>(
+            kzg_params.verifier_params(),
             vk,
-            strategy.clone(),
+            SingleStrategy::new(kzg_params),
             &[&[outputs.as_ref()]],
-            &mut transcript.clone(),
+            &mut transcript,
         )
-        .unwrap();
+        .unwrap()
     }
 
     /// Generate a proof and verify it.
