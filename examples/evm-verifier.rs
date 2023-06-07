@@ -1,11 +1,15 @@
+use ethers::{
+    signers::{LocalWallet, Signer},
+    utils::Anvil,
+};
 use eyre::Result;
 use halo2_proofs::{halo2curves::bn256::Fr, plonk::Circuit};
 use rand::rngs::OsRng;
-use std::{env, path::Path};
+use std::{env, path::Path, str::FromStr};
 use zero_g::{
     checked_in_test_data::*,
     eth::{
-        deploy::{deploy_contract, spawn_anvil, submit_proof, verify},
+        deploy::{deploy_contract, submit_proof, verify},
         gen_evm_verifier, gen_pk, gen_proof, gen_srs,
         vanilla_plonk_circuit::StandardPlonk,
     },
@@ -17,7 +21,7 @@ async fn validate_evm<C: Circuit<Fr> + Clone>(
     instances: Vec<Vec<Fr>>,
     k: u32,
     name: &str,
-    deploy: bool,
+    endpoint: Option<&String>,
 ) {
     println!("Generating Params...");
     let params = gen_srs(k);
@@ -32,16 +36,28 @@ async fn validate_evm<C: Circuit<Fr> + Clone>(
     println!("Verifying proof...");
     verify(deployment_code.clone(), instances.clone(), proof.clone());
 
-    if deploy {
-        println!("Spawning Anvil...");
-        let (anvil, wallet) = spawn_anvil();
+    if let Some(endpoint) = endpoint {
+        let anvil = Anvil::new().spawn();
+
+        let (endpoint, wallet) = if endpoint == "anvil" {
+            (anvil.endpoint(), anvil.keys()[0].clone().into())
+        } else {
+            let private_key = env::var("ETH_PRIVATE_KEY").expect("ETH_PRIVATE_KEY is not set");
+            (
+                endpoint.clone(),
+                LocalWallet::from_str(&private_key).unwrap(),
+            )
+        };
+
+        println!("Address: {:?}", wallet.address());
+
         println!("Deploying...");
-        let contract_address = deploy_contract(deployment_code, anvil.endpoint(), wallet.clone())
+        let contract_address = deploy_contract(deployment_code, endpoint.clone(), wallet.clone())
             .await
             .unwrap();
 
         println!("Submitting proof...");
-        submit_proof(instances, proof, anvil.endpoint(), wallet, contract_address)
+        submit_proof(instances, proof, endpoint, wallet, contract_address)
             .await
             .unwrap();
     }
@@ -59,13 +75,13 @@ async fn main() -> Result<()> {
 
         let outputs: Vec<Fr> = wnn.predict(&image).into_iter().map(Fr::from).collect();
         let instances = vec![outputs];
-        validate_evm(circuit, instances, k, &args[1], args.len() > 2).await;
+        validate_evm(circuit, instances, k, &args[1], args.get(2)).await;
     } else if args[1] == "plonk" {
         let circuit = StandardPlonk::rand(OsRng);
         let instances = circuit.instances();
         let k = 8;
 
-        validate_evm(circuit, instances, k, &args[1], args.len() > 2).await;
+        validate_evm(circuit, instances, k, &args[1], args.get(2)).await;
     } else {
         panic!("Unknown circuit: {:?}", args[1]);
     }

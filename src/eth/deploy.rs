@@ -1,12 +1,10 @@
 use ethers::{
     abi::Abi,
     contract::ContractFactory,
-    core::utils::Anvil,
     middleware::SignerMiddleware,
     providers::{Http, Middleware, Provider},
     signers::{LocalWallet, Signer},
     types::{Address, TransactionReceipt, TransactionRequest},
-    utils::AnvilInstance,
 };
 use eyre::{eyre, Result};
 use halo2_proofs::halo2curves::bn256::Fr;
@@ -42,13 +40,6 @@ pub fn verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>)
     assert!(success);
 }
 
-pub fn spawn_anvil() -> (AnvilInstance, LocalWallet) {
-    let anvil = Anvil::new().spawn();
-    let chain_id = anvil.chain_id();
-    let wallet: LocalWallet = anvil.keys()[0].clone().into();
-    (anvil, wallet.with_chain_id(chain_id))
-}
-
 fn print_receipt(receipt: TransactionReceipt) {
     println!("== Transaction summary");
     println!("  Transaction hash: {:?}", receipt.transaction_hash);
@@ -63,9 +54,10 @@ pub async fn deploy_contract(
 ) -> Result<Address> {
     // 3. connect to the network
     let provider = Provider::<Http>::try_from(endpoint)?.interval(Duration::from_millis(10u64));
+    let chain_id = provider.get_chainid().await?.as_u64();
 
     // 4. instantiate the client with the wallet
-    let client = SignerMiddleware::new(provider, wallet);
+    let client = SignerMiddleware::new(provider, wallet.with_chain_id(chain_id));
     let client = Arc::new(client);
 
     // 5. create a factory which will be used to deploy instances of the contract
@@ -73,6 +65,7 @@ pub async fn deploy_contract(
 
     // 6. deploy it with the constructor arguments
     let deployer = factory.deploy(())?;
+    // deployer.tx.set_gas(5000000);
     let (contract, deploy_receipt) = deployer.send_with_receipt().await?;
     print_receipt(deploy_receipt);
     println!("Deployed at address: {:?}", contract.address());
@@ -90,7 +83,8 @@ pub async fn submit_proof(
     let calldata = encode_calldata(&instances, &proof);
 
     let provider = Provider::<Http>::try_from(endpoint)?.interval(Duration::from_millis(10u64));
-    let client = SignerMiddleware::new(provider, wallet);
+    let chain_id = provider.get_chainid().await?.as_u64();
+    let client = SignerMiddleware::new(provider, wallet.with_chain_id(chain_id));
     let client = Arc::new(client);
 
     let tx = TransactionRequest::new()
