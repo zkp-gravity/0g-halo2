@@ -309,7 +309,7 @@ impl<F: PrimeFieldBits> Circuit<F> for WnnCircuit<F> {
     // so we stick with SimpleFloorPlanner for now.
     // In principle, there is no good reason for a proving time overhead
     // of floor planning, and there are plans to get rid of it:
-    // https://github.com/zcash/halo2/issues/643
+    // https://github.com/zcash/halo2/issues/547
     type FloorPlanner = SimpleFloorPlanner;
     type Params = WnnCircuitParams;
 
