@@ -30,6 +30,7 @@ pub mod gadgets;
 pub mod io;
 pub mod utils;
 pub mod wnn;
+pub mod eth;
 
 pub use io::{load_grayscale_image, load_wnn};
 pub use wnn::Wnn;

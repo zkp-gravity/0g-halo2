@@ -34,6 +34,10 @@ indicatif = "0.17.3"
 snark-verifier = { git = "https://github.com/privacy-scaling-explorations/snark-verifier", tag = "v2023_04_20" }
 rand = "0.8.5"
 itertools = "0.10.5"
+ethers = "2.0.7"
+futures = "0.3.28"
+tokio = { version = "1", features = ["full"] }
+eyre = "0.6.8"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
