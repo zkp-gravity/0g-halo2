@@ -13,7 +13,7 @@
 //! use zero_g::{
 //!     checked_in_test_data::*,
 //!     eth::{
-//!         deploy::dry_run_verifier, gen_evm_verifier,
+//!         dry_run_verifier, gen_evm_verifier,
 //!     },
 //!     load_grayscale_image, load_wnn,
 //! };
