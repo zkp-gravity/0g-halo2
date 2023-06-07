@@ -3,38 +3,37 @@ use ethers::{
     utils::Anvil,
 };
 use eyre::Result;
-use halo2_proofs::{halo2curves::bn256::Fr, plonk::Circuit};
+use halo2_proofs::{
+    halo2curves::bn256::{Bn256, Fr, G1Affine},
+    plonk::VerifyingKey,
+    poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
+};
 use rand::rngs::OsRng;
 use std::{env, path::Path, str::FromStr};
 use zero_g::{
     checked_in_test_data::*,
     eth::{
-        deploy::{deploy_contract, submit_proof, verify},
-        gen_evm_verifier, gen_pk, gen_proof, gen_srs,
+        deploy::{deploy_contract, dry_run_verifier, submit_proof},
+        gen_evm_verifier,
         vanilla_plonk_circuit::StandardPlonk,
     },
     load_grayscale_image, load_wnn,
 };
 
-async fn validate_evm<C: Circuit<Fr> + Clone>(
-    circuit: C,
+async fn validate_evm(
+    kzg_params: ParamsKZG<Bn256>,
+    vk: &VerifyingKey<G1Affine>,
+    proof: Vec<u8>,
     instances: Vec<Vec<Fr>>,
-    k: u32,
-    name: &str,
     endpoint: Option<&String>,
 ) {
-    println!("Generating Params...");
-    let params = gen_srs(k);
-    println!("Generating PK...");
-    let pk = gen_pk(&params, &circuit);
     println!("Generating deployment code...");
-    let deployment_code = gen_evm_verifier(&params, pk.get_vk(), vec![instances[0].len()], name);
-
-    println!("Generating proof...");
-    let proof = gen_proof(&params, &pk, circuit.clone(), instances.clone());
+    let deployment_code = gen_evm_verifier(&kzg_params, vk, vec![instances[0].len()]);
 
     println!("Verifying proof...");
-    verify(deployment_code.clone(), instances.clone(), proof.clone());
+    let gas_used =
+        dry_run_verifier(deployment_code.clone(), instances.clone(), proof.clone()).unwrap();
+    println!("Gas used: {}", gas_used);
 
     if let Some(endpoint) = endpoint {
         let anvil = Anvil::new().spawn();
@@ -52,12 +51,12 @@ async fn validate_evm<C: Circuit<Fr> + Clone>(
         println!("Address: {:?}", wallet.address());
 
         println!("Deploying...");
-        let contract_address = deploy_contract(deployment_code, endpoint.clone(), wallet.clone())
+        let contract_address = deploy_contract(endpoint.clone(), wallet.clone(), deployment_code)
             .await
             .unwrap();
 
         println!("Submitting proof...");
-        submit_proof(instances, proof, endpoint, wallet, contract_address)
+        submit_proof(endpoint, wallet, contract_address, proof, instances)
             .await
             .unwrap();
     }
@@ -71,17 +70,29 @@ async fn main() -> Result<()> {
 
         let wnn = load_wnn(Path::new(model_path)).unwrap();
         let image = load_grayscale_image(Path::new(TEST_IMG_PATH)).unwrap();
-        let circuit = wnn.get_circuit(&image);
 
-        let outputs: Vec<Fr> = wnn.predict(&image).into_iter().map(Fr::from).collect();
-        let instances = vec![outputs];
-        validate_evm(circuit, instances, k, &args[1], args.get(2)).await;
+        let kzg_params = ParamsKZG::<Bn256>::new(k);
+        let pk = wnn.generate_proving_key(&kzg_params);
+        let (proof, instance_column) = wnn.proof(&pk, &kzg_params, &image);
+
+        validate_evm(
+            kzg_params,
+            pk.get_vk(),
+            proof,
+            vec![instance_column],
+            args.get(2),
+        )
+        .await;
     } else if args[1] == "plonk" {
         let circuit = StandardPlonk::rand(OsRng);
         let instances = circuit.instances();
         let k = 8;
 
-        validate_evm(circuit, instances, k, &args[1], args.get(2)).await;
+        let kzg_params = ParamsKZG::<Bn256>::new(k);
+        let pk = circuit.gen_pk(&kzg_params);
+        let proof = circuit.gen_proof(&kzg_params, &pk, instances.clone());
+
+        validate_evm(kzg_params, pk.get_vk(), proof, instances, args.get(2)).await;
     } else {
         panic!("Unknown circuit: {:?}", args[1]);
     }

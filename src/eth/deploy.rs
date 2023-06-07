@@ -1,3 +1,4 @@
+//! Utility functions for deploying and verifying on EVM.
 use ethers::{
     abi::Abi,
     contract::ContractFactory,
@@ -12,32 +13,36 @@ use snark_verifier::loader::evm::encode_calldata;
 use snark_verifier::loader::evm::ExecutorBuilder;
 use std::{sync::Arc, time::Duration};
 
-pub fn verify(deployment_code: Vec<u8>, instances: Vec<Vec<Fr>>, proof: Vec<u8>) {
+/// Dry runs a given EVM contract locally using `revm`, returning the gas used.
+pub fn dry_run_verifier(
+    deployment_code: Vec<u8>,
+    instances: Vec<Vec<Fr>>,
+    proof: Vec<u8>,
+) -> Result<u64> {
     let calldata = encode_calldata(&instances, &proof);
-    let success = {
-        let mut evm = ExecutorBuilder::default()
-            .with_gas_limit(u64::MAX.into())
-            .build();
+    let mut evm = ExecutorBuilder::default()
+        .with_gas_limit(u64::MAX.into())
+        .build();
 
-        let caller = Address::from_low_u64_be(0xfe);
-        let deployment_result = evm.deploy(caller, deployment_code.into(), 0.into());
+    let caller = Address::from_low_u64_be(0xfe);
+    let deployment_result = evm.deploy(caller, deployment_code.into(), 0.into());
 
-        let verifier = deployment_result.address;
-        match verifier {
-            Some(verifier) => {
-                let result = evm.call_raw(caller, verifier, calldata.into(), 0.into());
+    let verifier = deployment_result.address;
+    match verifier {
+        Some(verifier) => {
+            let result = evm.call_raw(caller, verifier, calldata.into(), 0.into());
 
-                dbg!(result.gas_used);
-
-                !result.reverted
-            }
-            None => {
-                println!("Deployment result: {:?}", deployment_result.exit_reason);
-                false
+            if !result.reverted {
+                Ok(result.gas_used)
+            } else {
+                Err(eyre!("Verifier reverted"))
             }
         }
-    };
-    assert!(success);
+        None => Err(eyre!(
+            "Verifier deployment failed: {:?}",
+            deployment_result.exit_reason
+        )),
+    }
 }
 
 fn print_receipt(receipt: TransactionReceipt) {
@@ -47,45 +52,40 @@ fn print_receipt(receipt: TransactionReceipt) {
     println!("  Gas used: {:?}", receipt.gas_used.unwrap());
 }
 
+/// Deploys an EVM contract.
 pub async fn deploy_contract(
-    deployment_code: Vec<u8>,
     endpoint: String,
     wallet: LocalWallet,
+    deployment_code: Vec<u8>,
 ) -> Result<Address> {
-    // 3. connect to the network
     let provider = Provider::<Http>::try_from(endpoint)?.interval(Duration::from_millis(10u64));
     let chain_id = provider.get_chainid().await?.as_u64();
-
-    // 4. instantiate the client with the wallet
     let client = SignerMiddleware::new(provider, wallet.with_chain_id(chain_id));
     let client = Arc::new(client);
 
-    // 5. create a factory which will be used to deploy instances of the contract
     let factory = ContractFactory::new(Abi::default(), deployment_code.into(), client.clone());
 
-    // 6. deploy it with the constructor arguments
-    let deployer = factory.deploy(())?;
-    // deployer.tx.set_gas(5000000);
-    let (contract, deploy_receipt) = deployer.send_with_receipt().await?;
+    let (contract, deploy_receipt) = factory.deploy(())?.send_with_receipt().await?;
     print_receipt(deploy_receipt);
-    println!("Deployed at address: {:?}", contract.address());
+    println!("Deployed to address: {:?}", contract.address());
 
     Ok(contract.address())
 }
 
+/// Submits a proof to an EVM contract.
 pub async fn submit_proof(
-    instances: Vec<Vec<Fr>>,
-    proof: Vec<u8>,
     endpoint: String,
     wallet: LocalWallet,
     contract_address: Address,
+    proof: Vec<u8>,
+    instances: Vec<Vec<Fr>>,
 ) -> Result<()> {
-    let calldata = encode_calldata(&instances, &proof);
-
     let provider = Provider::<Http>::try_from(endpoint)?.interval(Duration::from_millis(10u64));
     let chain_id = provider.get_chainid().await?.as_u64();
     let client = SignerMiddleware::new(provider, wallet.with_chain_id(chain_id));
     let client = Arc::new(client);
+
+    let calldata = encode_calldata(&instances, &proof);
 
     let tx = TransactionRequest::new()
         .to(contract_address)

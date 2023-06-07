@@ -13,15 +13,14 @@ use halo2_proofs::{
             strategy::SingleStrategy,
         },
     },
-    transcript::{
-        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
-    },
+    transcript::{Blake2bRead, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer},
 };
 use ndarray::{s, Array1, Array2, Array3};
 
 use halo2_proofs::halo2curves::bn256::{Bn256, Fr as Fp, G1Affine};
 use num_bigint::BigUint;
 use rand_core::OsRng;
+use snark_verifier::system::halo2::transcript::evm::EvmTranscript;
 
 use crate::gadgets::wnn::{WnnCircuit, WnnCircuitParams};
 
@@ -237,10 +236,17 @@ impl Wnn {
         let outputs: Vec<Fp> = self.predict(image).into_iter().map(Fp::from).collect();
 
         let circuit = self.get_circuit(image);
-
-        let mut transcript: Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>> =
-            Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof::<KZGCommitmentScheme<Bn256>, ProverGWC<Bn256>, _, _, _, _>(
+        let mut transcript = TranscriptWriterBuffer::<_, G1Affine, _>::init(Vec::new());
+        create_proof::<
+            KZGCommitmentScheme<Bn256>,
+            ProverGWC<_>,
+            _,
+            _,
+            // Use `EvmTranscript` (based on keccak256) so that proofs are verifiable
+            // with the EVM verifier
+            EvmTranscript<_, _, _, _>,
+            _,
+        >(
             kzg_params,
             pk,
             &[circuit],

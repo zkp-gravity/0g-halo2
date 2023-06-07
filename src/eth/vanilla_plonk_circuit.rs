@@ -1,10 +1,26 @@
 use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner, Value},
-    halo2curves::{bn256::Fr, ff::Field},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Fixed, Instance},
-    poly::Rotation,
+    halo2curves::{
+        bn256::{Bn256, Fr, G1Affine},
+        ff::Field,
+    },
+    plonk::{
+        create_proof, keygen_pk, keygen_vk, Advice, Circuit, Column, ConstraintSystem, Error,
+        Fixed, Instance, ProvingKey,
+    },
+    poly::{
+        kzg::{
+            commitment::{KZGCommitmentScheme, ParamsKZG},
+            multiopen::ProverGWC,
+        },
+        Rotation,
+    },
+    transcript::TranscriptWriterBuffer,
 };
+use itertools::Itertools;
 use rand::RngCore;
+use rand_core::OsRng;
+use snark_verifier::system::halo2::transcript::evm::EvmTranscript;
 
 #[derive(Clone, Copy)]
 pub struct StandardPlonkConfig {
@@ -70,6 +86,45 @@ impl StandardPlonk {
 
     pub fn instances(&self) -> Vec<Vec<Fr>> {
         vec![vec![self.0]]
+    }
+
+    pub fn gen_pk(&self, params: &ParamsKZG<Bn256>) -> ProvingKey<G1Affine> {
+        let vk = keygen_vk(params, self).unwrap();
+        keygen_pk(params, vk, self).unwrap()
+    }
+
+    pub fn gen_proof(
+        self,
+        params: &ParamsKZG<Bn256>,
+        pk: &ProvingKey<G1Affine>,
+        instances: Vec<Vec<Fr>>,
+    ) -> Vec<u8> {
+        let instances = instances
+            .iter()
+            .map(|instances| instances.as_slice())
+            .collect_vec();
+        let proof = {
+            let mut transcript = TranscriptWriterBuffer::<_, G1Affine, _>::init(Vec::new());
+            create_proof::<
+                KZGCommitmentScheme<Bn256>,
+                ProverGWC<_>,
+                _,
+                _,
+                EvmTranscript<_, _, _, _>,
+                _,
+            >(
+                params,
+                pk,
+                &[self],
+                &[instances.as_slice()],
+                OsRng,
+                &mut transcript,
+            )
+            .unwrap();
+            transcript.finalize()
+        };
+
+        proof
     }
 }
 
