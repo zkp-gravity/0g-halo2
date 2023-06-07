@@ -5,8 +5,10 @@ In this project, we're developing a Halo2 implementation of the [Zero Gravity](h
 ## Setup
 
 To get started:
-- Install version 1.12.2 of [HDF5](https://github.com/mokus0/hdf5/blob/master/release_docs/INSTALL)
 - Install [Rust](https://www.rust-lang.org/tools/install)
+- Install version 0.8.17 of `solc`:
+  `(hash svm 2>/dev/null || cargo install svm-rs) && svm install 0.8.17`
+- Install version 1.12.2 of [HDF5](https://github.com/mokus0/hdf5/blob/master/release_docs/INSTALL)
 - Run the tests: `cargo test`
 - Run the benchmarks: `cargo bench`
 - Build the binaries: `cargo build --release`
