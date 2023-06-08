@@ -27,7 +27,7 @@ use crate::gadgets::wnn::{WnnCircuit, WnnCircuitParams};
 /// Implementation of a [BTHOWeN](https://arxiv.org/abs/2203.01479)-style weightless neural network (WNN).
 pub struct Wnn {
     /// Number of classes (e.g. 10 for MNIST)
-    num_classes: usize,
+    pub num_classes: usize,
 
     /// Number fo input bits per filter
     num_filter_inputs: usize,

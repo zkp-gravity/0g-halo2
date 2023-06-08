@@ -26,3 +26,5 @@ jobs:
       run: cargo build --release --verbose
     - name: Run tests
       run: cargo test --release --verbose
+    - name: Test CLI
+      run: ./test_cli.sh

@@ -22,9 +22,9 @@ You can install the command line tool by running `cargo install --path .`.
 Then, run `zero_g --help` for documentation of the tool.
 
 Here are a few examples:
-- `zero_g predict models/model_28input_256entry_1hash_1bpi.hdf5 benches/example_image_7.png` classifies a single image.
-- `zero_g compute-accuracy models/model_28input_256entry_1hash_1bpi.hdf5` computes the accuracy on the MNIST test set. This should yield the same number as the `evaluate.py` script in the `BTHOWeN-zero-g` repository.
-- `zero_g proof models/model_28input_256entry_1hash_1bpi.hdf5 benches/example_image_7.png 12` classifies a single image, generates the keys & proof, and verifies the proof.
+- `zero_g predict -m models/model_28input_256entry_1hash_1bpi.hdf5 -i benches/example_image_7.png` classifies a single image.
+- `zero_g compute-accuracy -m models/model_28input_256entry_1hash_1bpi.hdf5 -t data/MNIST/png/` computes the accuracy on the MNIST test set. This should yield the same number as the `evaluate.py` script in the `BTHOWeN-zero-g` repository.
+- `zero_g proof -m models/model_28input_256entry_1hash_1bpi.hdf5 -i benches/example_image_7.png -k 12` classifies a single image, generates the keys & proof, and verifies the proof.
 
 ## Using `zero_g` as a library
 
