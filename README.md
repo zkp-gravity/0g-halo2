@@ -6,9 +6,10 @@ In this project, we're developing a Halo2 implementation of the [Zero Gravity](h
 
 To get started:
 - Install [Rust](https://www.rust-lang.org/tools/install)
-- Install version 0.8.17 of `solc`:
-  `(hash svm 2>/dev/null || cargo install svm-rs) && svm install 0.8.17`
 - Install version 1.12.2 of [HDF5](https://github.com/mokus0/hdf5/blob/master/release_docs/INSTALL)
+-  For EVM commands: Install version 0.8.17 of `solc`:
+  `(hash svm 2>/dev/null || cargo install svm-rs) && svm install 0.8.17`
+- For EVM commands: Install [Anvil](https://github.com/foundry-rs/foundry/tree/master/anvil)
 - Run the tests: `cargo test`
 - Run the benchmarks: `cargo bench`
 - Build the binaries: `cargo build --release`
@@ -22,9 +23,9 @@ You can install the command line tool by running `cargo install --path .`.
 Then, run `zero_g --help` for documentation of the tool.
 
 Here are a few examples:
-- `zero_g predict models/model_28input_256entry_1hash_1bpi.hdf5 benches/example_image_7.png` classifies a single image.
-- `zero_g compute-accuracy models/model_28input_256entry_1hash_1bpi.hdf5` computes the accuracy on the MNIST test set. This should yield the same number as the `evaluate.py` script in the `BTHOWeN-zero-g` repository.
-- `zero_g proof models/model_28input_256entry_1hash_1bpi.hdf5 benches/example_image_7.png 12` classifies a single image, generates the keys & proof, and verifies the proof.
+- `zero_g predict -m models/model_28input_256entry_1hash_1bpi.hdf5 -i benches/example_image_7.png` classifies a single image.
+- `zero_g compute-accuracy -m models/model_28input_256entry_1hash_1bpi.hdf5 -t data/MNIST/png/` computes the accuracy on the MNIST test set. This should yield the same number as the `evaluate.py` script in the `BTHOWeN-zero-g` repository.
+- `zero_g proof -m models/model_28input_256entry_1hash_1bpi.hdf5 -i benches/example_image_7.png -k 12` classifies a single image, generates the keys & proof, and verifies the proof.
 
 ## Using `zero_g` as a library
 

@@ -77,3 +77,30 @@ pub fn load_wnn(path: &Path) -> Result<Wnn> {
         binarization_thresholds,
     ))
 }
+
+/// Given a path like `data/MNIST/png/0000_7.png`, read the correct class (in this case 7).
+pub fn parse_png_file(img_path: &Path) -> Option<usize> {
+    match img_path.extension() {
+        Some(extension) => {
+            if extension == "png" {
+                Some(
+                    img_path
+                        .file_stem()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .chars()
+                        .last()
+                        .unwrap()
+                        .to_digit(10)
+                        .unwrap()
+                        .try_into()
+                        .unwrap(),
+                )
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}

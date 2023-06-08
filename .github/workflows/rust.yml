@@ -16,6 +16,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    - name: Install Anvil
+      uses: foundry-rs/foundry-toolchain@v1
     - name: Install HDF5
       run: sudo apt-get install libhdf5-dev
     - name: Install solc
@@ -26,3 +28,5 @@ jobs:
       run: cargo build --release --verbose
     - name: Run tests
       run: cargo test --release --verbose
+    - name: Test CLI
+      run: ./test_cli.sh

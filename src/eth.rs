@@ -41,9 +41,11 @@ use ethers::{
     abi::Abi,
     contract::ContractFactory,
     middleware::SignerMiddleware,
+    prelude::k256::ecdsa::SigningKey,
     providers::{Http, Middleware, Provider},
-    signers::{LocalWallet, Signer},
+    signers::{LocalWallet, Signer, Wallet},
     types::{Address, TransactionReceipt, TransactionRequest},
+    utils::{Anvil, AnvilInstance},
 };
 use eyre::{eyre, Result};
 use halo2_proofs::{
@@ -59,7 +61,7 @@ use snark_verifier::{
     system::halo2::{compile, transcript::evm::EvmTranscript, Config},
     verifier::{plonk::PlonkVerifier, SnarkVerifier},
 };
-use std::rc::Rc;
+use std::{env, rc::Rc, str::FromStr};
 use std::{sync::Arc, time::Duration};
 
 /// Generates EVM bytecode for a verifier contract.
@@ -138,55 +140,88 @@ pub fn dry_run_verifier(
 fn print_receipt(receipt: TransactionReceipt) {
     println!("== Transaction summary");
     println!("  Transaction hash: {:?}", receipt.transaction_hash);
-    println!("  Deployed at block: {:?}", receipt.block_number);
+    println!("  Included in block: {:?}", receipt.block_number);
     println!("  Gas used: {:?}", receipt.gas_used.unwrap());
 }
 
-/// Deploys an EVM contract.
-pub async fn deploy_contract(
-    endpoint: String,
-    wallet: LocalWallet,
-    deployment_code: Vec<u8>,
-) -> Result<Address> {
-    let provider = Provider::<Http>::try_from(endpoint)?.interval(Duration::from_millis(10u64));
-    let chain_id = provider.get_chainid().await?.as_u64();
-    let client = SignerMiddleware::new(provider, wallet.with_chain_id(chain_id));
-    let client = Arc::new(client);
+type ConcreteMiddleware = SignerMiddleware<Provider<Http>, Wallet<SigningKey>>;
 
-    let factory = ContractFactory::new(Abi::default(), deployment_code.into(), client.clone());
-
-    let (contract, deploy_receipt) = factory.deploy(())?.send_with_receipt().await?;
-    print_receipt(deploy_receipt);
-    println!("Deployed to address: {:?}", contract.address());
-
-    Ok(contract.address())
+/// A client to deploy verifier contracts and submit proofs to it.
+pub struct EthClient {
+    /// An instance of Anvil. This variable is never accessed, but should
+    /// live as long as the client.
+    _anvil_instance: AnvilInstance,
+    client: Arc<ConcreteMiddleware>,
+    pub address: Address,
 }
 
-/// Submits a proof to an EVM contract.
-pub async fn submit_proof(
-    endpoint: String,
-    wallet: LocalWallet,
-    contract_address: Address,
-    proof: Vec<u8>,
-    instances: Vec<Vec<Fr>>,
-) -> Result<()> {
-    let provider = Provider::<Http>::try_from(endpoint)?.interval(Duration::from_millis(10u64));
-    let chain_id = provider.get_chainid().await?.as_u64();
-    let client = SignerMiddleware::new(provider, wallet.with_chain_id(chain_id));
-    let client = Arc::new(client);
+impl EthClient {
+    /// Creates a new client.
+    ///
+    /// Arguments:
+    /// - `endpoint`: The endpoint to connect to. If `anvil`, will use a
+    ///   local Anvil instance. Otherwise, the `ETH_PRIVATE_KEY` must be set
+    ///   and the client will connect to the given (http) endpoint.
+    pub async fn new(endpoint: String) -> Result<Self> {
+        let anvil = Anvil::new().spawn();
 
-    let calldata = encode_calldata(&instances, &proof);
+        let (endpoint, wallet) = if endpoint == "anvil" {
+            (anvil.endpoint(), anvil.keys()[0].clone().into())
+        } else {
+            let private_key = env::var("ETH_PRIVATE_KEY").expect("ETH_PRIVATE_KEY is not set");
+            (
+                endpoint.clone(),
+                LocalWallet::from_str(&private_key).unwrap(),
+            )
+        };
 
-    let tx = TransactionRequest::new()
-        .to(contract_address)
-        .data(calldata);
-    let receipt = client
-        .send_transaction(tx, None)
-        .await?
-        .await?
-        .ok_or(eyre!("No receipt!"))?;
+        let address = wallet.address();
 
-    print_receipt(receipt);
+        let provider = Provider::<Http>::try_from(endpoint)?.interval(Duration::from_millis(10u64));
+        let chain_id = provider.get_chainid().await?.as_u64();
+        let client = SignerMiddleware::new(provider, wallet.with_chain_id(chain_id));
+        let client = Arc::new(client);
 
-    Ok(())
+        Ok(Self {
+            _anvil_instance: anvil,
+            client,
+            address,
+        })
+    }
+
+    /// Deploys an EVM contract.
+    pub async fn deploy_contract(&self, deployment_code: Vec<u8>) -> Result<Address> {
+        let factory =
+            ContractFactory::new(Abi::default(), deployment_code.into(), self.client.clone());
+
+        let (contract, deploy_receipt) = factory.deploy(())?.send_with_receipt().await?;
+        print_receipt(deploy_receipt);
+        println!("Deployed to address: {:?}", contract.address());
+
+        Ok(contract.address())
+    }
+
+    /// Submits a proof to an EVM contract.
+    pub async fn submit_proof(
+        &self,
+        contract_address: Address,
+        proof: Vec<u8>,
+        instances: Vec<Vec<Fr>>,
+    ) -> Result<()> {
+        let calldata = encode_calldata(&instances, &proof);
+
+        let tx = TransactionRequest::new()
+            .to(contract_address)
+            .data(calldata);
+        let receipt = self
+            .client
+            .send_transaction(tx, None)
+            .await?
+            .await?
+            .ok_or(eyre!("No receipt!"))?;
+
+        print_receipt(receipt);
+
+        Ok(())
+    }
 }
