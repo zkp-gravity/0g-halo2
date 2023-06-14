@@ -90,7 +90,6 @@ impl<F: PrimeFieldBits> HashChip<F> {
             let msb = meta.query_advice(msb, Rotation::cur());
             let hash = meta.query_advice(hash, Rotation::cur());
 
-            // TODO: Handle possible overflows
             let input_cubed = input.clone() * input.clone() * input;
             let mod_p_decomposition = quotient
                 * Expression::Constant(F::from(hash_function_config.p))
