@@ -1,7 +1,8 @@
 //! Utilities for loading images and WNNs from disk.
 
+use std::fmt;
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
 use halo2_proofs::halo2curves::bn256::{Bn256, Fr, G1Affine};
@@ -115,62 +116,66 @@ pub fn parse_png_file(img_path: &Path) -> Option<usize> {
     }
 }
 
+fn with_writer<E>(path: &Path, f: impl FnOnce(&mut BufWriter<File>) -> Result<(), E>)
+where
+    E: fmt::Debug,
+{
+    let file = File::create(path).expect("Unable to create file");
+    let mut writer = BufWriter::new(file);
+    f(&mut writer).expect("Unable to write to file");
+    writer.flush().expect("Unable to flush file");
+}
+
+fn with_reader<T, E>(path: &Path, f: impl FnOnce(&mut BufReader<File>) -> Result<T, E>) -> T
+where
+    E: fmt::Debug,
+{
+    let file = File::open(path).expect("Unable to open file");
+    let mut reader = BufReader::new(file);
+    f(&mut reader).expect("Unable to read from file")
+}
+
+/// Write SRS to file.
 pub fn write_srs(srs: &ParamsKZG<Bn256>, path: &Path) {
-    let f = File::create(path).expect("Unable to create file");
-    let mut writer = BufWriter::new(f);
-    srs.write(&mut writer).expect("Unable to write to file");
-    writer.flush().expect("Unable to flush file");
+    with_writer(path, |writer| srs.write(writer));
 }
 
+/// Read SRS from file.
 pub fn read_srs(path: &Path) -> ParamsKZG<Bn256> {
-    let f = File::open(path).expect("Unable to open file");
-    let mut reader = BufReader::new(f);
-    ParamsKZG::read(&mut reader).expect("Unable to read from file")
+    with_reader(path, |reader| ParamsKZG::read(reader))
 }
 
-pub fn write_keys(pk: &ProvingKey<G1Affine>, pk_path: &Path, vk_path: &Path) {
-    let f = File::create(pk_path).expect("Unable to create file");
-    let mut writer = BufWriter::new(f);
-    pk.write(&mut writer, RawBytes)
-        .expect("Unable to write to file");
-    writer.flush().expect("Unable to flush file");
-
-    let f = File::create(vk_path).expect("Unable to create file");
-    let mut writer = BufWriter::new(f);
-    pk.get_vk()
-        .write(&mut writer, halo2_proofs::SerdeFormat::RawBytes)
-        .expect("Unable to write to file");
-    writer.flush().expect("Unable to flush file");
-}
-
+/// Write the circuit parameters to file.
 pub fn write_circuit_params(circuit_params: &WnnCircuitParams, path: &Path) {
-    let encoded = serde_json::to_string(circuit_params).expect("Error serializing circuit params");
-    let mut file = File::create(path).expect("Unable to create file");
-    file.write_all(encoded.as_bytes())
-        .expect("Unable to write to file");
+    with_writer(path, |writer| serde_json::to_writer(writer, circuit_params));
 }
 
+/// Read the circuit parameters from file.
 pub fn read_circuit_params(path: &Path) -> WnnCircuitParams {
-    let mut file = File::open(path).expect("Unable to open file");
-    let mut data = String::new();
-    file.read_to_string(&mut data).expect("Unable to read file");
-    serde_json::from_str(&data).expect("Error deserializing circuit params")
+    with_reader(path, |reader| serde_json::from_reader(reader))
 }
 
+/// Write proving key and verification key to file.
+pub fn write_keys(pk: &ProvingKey<G1Affine>, pk_path: &Path, vk_path: &Path) {
+    with_writer(pk_path, |writer| pk.write(writer, RawBytes));
+    with_writer(vk_path, |writer| pk.get_vk().write(writer, RawBytes));
+}
+
+/// Read proving key from file.
 pub fn read_pk(path: &Path, circuit_params: WnnCircuitParams) -> ProvingKey<G1Affine> {
-    let f = File::open(path).expect("Unable to open file");
-    let mut reader = BufReader::new(f);
-    ProvingKey::read::<_, WnnCircuit<_>>(&mut reader, RawBytes, circuit_params)
-        .expect("Unable to read from file")
+    with_reader(path, |reader| {
+        ProvingKey::read::<_, WnnCircuit<_>>(reader, RawBytes, circuit_params)
+    })
 }
 
+/// Read verification key from file.
 pub fn read_vk(path: &Path, circuit_params: WnnCircuitParams) -> VerifyingKey<G1Affine> {
-    let f = File::open(path).expect("Unable to open file");
-    let mut reader = BufReader::new(f);
-    VerifyingKey::read::<_, WnnCircuit<_>>(&mut reader, RawBytes, circuit_params)
-        .expect("Unable to read from file")
+    with_reader(path, |reader| {
+        VerifyingKey::read::<_, WnnCircuit<_>>(reader, RawBytes, circuit_params)
+    })
 }
 
+/// Wraps the circuit's output and proof, impelements (de)serialization.
 #[derive(Serialize, Deserialize)]
 pub struct ProofWithOutput {
     pub proof: Vec<u8>,
@@ -190,17 +195,13 @@ impl From<ProofWithOutput> for (Vec<u8>, Vec<Fr>) {
 }
 
 impl ProofWithOutput {
+    /// Write the proof with output to file.
     pub fn write(&self, path: &Path) {
-        let encoded = serde_json::to_string(self).expect("Error serializing proof with output");
-        let mut file = File::create(path).expect("Unable to create file");
-        file.write_all(encoded.as_bytes())
-            .expect("Unable to write to file");
+        with_writer(path, |writer| serde_json::to_writer(writer, self));
     }
 
+    /// Read the proof with output from file.
     pub fn read(path: &Path) -> Self {
-        let mut file = File::open(path).expect("Unable to open file");
-        let mut data = String::new();
-        file.read_to_string(&mut data).expect("Unable to read file");
-        serde_json::from_str(&data).expect("Error deserializing proof with output")
+        with_reader(path, |reader| serde_json::from_reader(reader))
     }
 }
