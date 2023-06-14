@@ -1,17 +1,23 @@
 use std::{fs, path::PathBuf};
 
 use clap::{Parser, Subcommand};
+use ethers::types::Address;
 use halo2_proofs::{
     halo2curves::bn256::Bn256,
     poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
 };
 use hdf5::Result;
+use hex;
 use indicatif::ProgressIterator;
 use zero_g::{
     eth::{dry_run_verifier, gen_evm_verifier, EthClient},
-    io::parse_png_file,
+    io::{
+        parse_png_file, read_circuit_params, read_pk, read_srs, read_vk, write_circuit_params,
+        write_keys, write_srs, ProofWithOutput,
+    },
     load_grayscale_image, load_wnn,
     utils::argmax,
+    Wnn,
 };
 
 #[derive(Parser)]
@@ -59,44 +65,57 @@ enum Commands {
     },
     /// Step 1: Generate the SRS
     GenerateSrs {
-        // TODO: Store SRS at srs_path
         /// The value `k` used for the powers of tau. The size of the SRS will be `2^k`.
         #[clap(short, long)]
         k: u32,
+        /// Path to write the SRS to
+        #[clap(short, long)]
+        srs_path: PathBuf,
     },
     /// Step 2: Generate the proving and verifying keys
     GenerateKeys {
-        // TODO: Remove k; add srs_path
-        // TODO: Store vk (with SRS) at vk_path, store pk (with SRS) at pk_path
         /// Path to the model (e.g. models/model_28input_2048entry_2hash_3bpi.hdf5)
         #[clap(short, long)]
         model_path: PathBuf,
-        /// The value `k` used for the powers of tau. The size of the SRS will be `2^k`.
+        /// Path to read the SRS from
         #[clap(short, long)]
-        k: u32,
+        srs_path: PathBuf,
+        /// Path to write the verifying key to
+        #[clap(short, long)]
+        vk_path: PathBuf,
+        /// Path to write the proving key to
+        #[clap(short, long)]
+        pk_path: PathBuf,
+        /// Path to write the circuit params to
+        #[clap(short, long)]
+        circuit_params_path: PathBuf,
     },
     /// Step 2.1: Generate the EVM verifier and run a test proof
     DryRunEvmVerifier {
-        // TODO: Remove k; add pk_path
         /// Path to the model (e.g. models/model_28input_2048entry_2hash_3bpi.hdf5)
         #[clap(short, long)]
         model_path: PathBuf,
         /// Path to the image (e.g. benches/example_image_7.png)
         #[clap(short, long)]
         img_path: PathBuf,
-        /// The value `k` used for the powers of tau. The size of the SRS will be `2^k`.
+        /// Path to read the SRS from
         #[clap(short, long)]
-        k: u32,
+        srs_path: PathBuf,
+        /// Path to read the proving key from (used to simulate test a proof and extract the verifying key)
+        #[clap(short, long)]
+        pk_path: PathBuf,
     },
     /// Step 2.2: Generate the EVM verifier
     DeployEvmVerifier {
-        // TODO: Remove k; add vk_path
-        /// Path to the model (e.g. models/model_28input_2048entry_2hash_3bpi.hdf5)
+        /// Path to read the SRS from
         #[clap(short, long)]
-        model_path: PathBuf,
-        /// The value `k` used for the powers of tau. The size of the SRS will be `2^k`.
+        srs_path: PathBuf,
+        /// Path to read the verifying key from
         #[clap(short, long)]
-        k: u32,
+        vk_path: PathBuf,
+        /// Path to read the circuit params from
+        #[clap(short, long)]
+        circuit_params_path: PathBuf,
         /// The HTTP endpoint to the chain, or "anvil" to use the Anvil testnet.
         /// If not "anvil", the "ETH_PRIVATE_KEY" must be set to your private key.
         #[clap(default_value_t = String::from("anvil"), short, long)]
@@ -104,43 +123,45 @@ enum Commands {
     },
     /// Step 3: Proof inference of a particular image
     Proof {
-        // TODO: Remove k; add pk_path
-        // TODO: Store proof (with instance) at proof_path
         /// Path to the model (e.g. models/model_28input_2048entry_2hash_3bpi.hdf5)
         #[clap(short, long)]
         model_path: PathBuf,
         /// Path to the image (e.g. benches/example_image_7.png)
         #[clap(short, long)]
         img_path: PathBuf,
-        /// The value `k` used for the powers of tau. The size of the SRS will be `2^k`.
+        /// Path to read the SRS from
         #[clap(short, long)]
-        k: u32,
+        srs_path: PathBuf,
+        /// Path to read the proving key from
+        #[clap(short, long)]
+        pk_path: PathBuf,
+        /// Path to store the proof to
+        #[clap(short, long)]
+        proof_path: PathBuf,
     },
     /// Step 4: Verify the proof
     Verify {
-        // TODO: Remove model_path, k & img_path; add vk_path & proof_path
-        /// Path to the model (e.g. models/model_28input_2048entry_2hash_3bpi.hdf5)
+        /// Path to read the SRS from
         #[clap(short, long)]
-        model_path: PathBuf,
-        /// Path to the image (e.g. benches/example_image_7.png)
+        srs_path: PathBuf,
+        /// Path to read the verifying key from
         #[clap(short, long)]
-        img_path: PathBuf,
-        /// The value `k` used for the powers of tau. The size of the SRS will be `2^k`.
+        vk_path: PathBuf,
+        /// Path to read the circuit params from
         #[clap(short, long)]
-        k: u32,
+        circuit_params_path: PathBuf,
+        /// Path to read the proof from
+        #[clap(short, long)]
+        proof_path: PathBuf,
     },
     /// Step 4.1: Submit the proof to the EVM verifier
     SubmitProof {
-        // TODO: Remove model_path, img_path, k; add proof_path and conract_address
-        /// Path to the model (e.g. models/model_28input_2048entry_2hash_3bpi.hdf5)
+        /// Path to read the proof from
         #[clap(short, long)]
-        model_path: PathBuf,
-        /// Path to the image (e.g. benches/example_image_7.png)
+        proof_path: PathBuf,
+        /// Contract address (e.g. 0x5fbdb2315678afecb367f032d93f642f64180aa3)
         #[clap(short, long)]
-        img_path: PathBuf,
-        /// The value `k` used for the powers of tau. The size of the SRS will be `2^k`.
-        #[clap(short, long)]
-        k: u32,
+        contract_address: String,
         /// The HTTP endpoint to the chain, or "anvil" to use the Anvil testnet.
         /// If not "anvil", the "ETH_PRIVATE_KEY" must be set to your private key.
         #[clap(default_value_t = String::from("anvil"), short, long)]
@@ -208,27 +229,36 @@ async fn main() -> Result<()> {
             wnn.plot_circuit("real_wnn_layout.png", k);
             Ok(())
         }
-        Commands::GenerateSrs { k } => {
-            ParamsKZG::<Bn256>::new(k);
+        Commands::GenerateSrs { k, srs_path } => {
+            let srs = ParamsKZG::<Bn256>::new(k);
+            write_srs(&srs, &srs_path);
             Ok(())
         }
-        Commands::GenerateKeys { model_path, k } => {
+        Commands::GenerateKeys {
+            model_path,
+            srs_path,
+            vk_path,
+            pk_path,
+            circuit_params_path,
+        } => {
             let wnn = load_wnn(&model_path)?;
-            let kzg_params = ParamsKZG::<Bn256>::new(k);
-            wnn.generate_proving_key(&kzg_params);
+            let kzg_params = read_srs(&srs_path);
+            let pk = wnn.generate_proving_key(&kzg_params);
+            write_keys(&pk, &pk_path, &vk_path);
+            write_circuit_params(&wnn.get_circuit_params(), &circuit_params_path);
             Ok(())
         }
         Commands::DryRunEvmVerifier {
             model_path,
             img_path,
-            k,
+            srs_path,
+            pk_path,
         } => {
             let img = load_grayscale_image(&img_path).unwrap();
             let wnn = load_wnn(&model_path).unwrap();
 
-            println!("Generating keys...");
-            let kzg_params = ParamsKZG::new(k);
-            let pk = wnn.generate_proving_key(&kzg_params);
+            let kzg_params = read_srs(&srs_path);
+            let pk = read_pk(&pk_path, wnn.get_circuit_params());
 
             println!("Generating proof...");
             let (proof, outputs) = wnn.proof(&pk, &kzg_params, &img);
@@ -242,18 +272,18 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Commands::DeployEvmVerifier {
-            model_path,
-            k,
+            srs_path,
+            vk_path,
+            circuit_params_path,
             endpoint,
         } => {
-            let wnn = load_wnn(&model_path).unwrap();
-
-            println!("Generating keys...");
-            let kzg_params = ParamsKZG::new(k);
-            let pk = wnn.generate_proving_key(&kzg_params);
+            let kzg_params = read_srs(&srs_path);
+            let circuit_params = read_circuit_params(&circuit_params_path);
+            let n_classes = circuit_params.n_classes;
+            let vk = read_vk(&vk_path, circuit_params);
 
             println!("Generating EVM verifier...");
-            let deployment_code = gen_evm_verifier(&kzg_params, pk.get_vk(), vec![wnn.num_classes]);
+            let deployment_code = gen_evm_verifier(&kzg_params, &vk, vec![n_classes]);
 
             let client = EthClient::new(endpoint)
                 .await
@@ -269,52 +299,50 @@ async fn main() -> Result<()> {
         Commands::Proof {
             model_path,
             img_path,
-            k,
+            srs_path,
+            pk_path,
+            proof_path,
         } => {
             let wnn = load_wnn(&model_path)?;
             let img = load_grayscale_image(&img_path).unwrap();
 
-            let kzg_params = ParamsKZG::<Bn256>::new(k);
-            let pk = wnn.generate_proving_key(&kzg_params);
+            let kzg_params = read_srs(&srs_path);
+            let pk = read_pk(&pk_path, wnn.get_circuit_params());
 
-            let (_proof, _outputs) = wnn.proof(&pk, &kzg_params, &img);
+            ProofWithOutput::from(wnn.proof(&pk, &kzg_params, &img)).write(&proof_path);
             Ok(())
         }
         Commands::Verify {
-            model_path,
-            img_path,
-            k,
+            srs_path,
+            vk_path,
+            circuit_params_path,
+            proof_path,
         } => {
-            let wnn = load_wnn(&model_path)?;
-            let img = load_grayscale_image(&img_path).unwrap();
+            let kzg_params = read_srs(&srs_path);
+            let circuit_params = read_circuit_params(&circuit_params_path);
+            let vk = read_vk(&vk_path, circuit_params);
+            let (proof, outputs) = ProofWithOutput::read(&proof_path).into();
 
-            let kzg_params = ParamsKZG::<Bn256>::new(k);
-            let pk = wnn.generate_proving_key(&kzg_params);
-            let vk = pk.get_vk();
-
-            let (proof, outputs) = wnn.proof(&pk, &kzg_params, &img);
-
-            wnn.verify_proof(&proof, &kzg_params, vk, &outputs);
+            Wnn::verify_proof(&proof, &kzg_params, &vk, &outputs);
             Ok(())
         }
         Commands::SubmitProof {
-            model_path,
-            img_path,
-            k,
+            proof_path,
+            mut contract_address,
             endpoint,
         } => {
-            let img = load_grayscale_image(&img_path).unwrap();
-            let wnn = load_wnn(&model_path).unwrap();
-
-            let kzg_params = ParamsKZG::new(k);
-            let pk = wnn.generate_proving_key(&kzg_params);
-            let (proof, outputs) = wnn.proof(&pk, &kzg_params, &img);
-            let deployment_code = gen_evm_verifier(&kzg_params, pk.get_vk(), vec![outputs.len()]);
+            let (proof, outputs) = ProofWithOutput::read(&proof_path).into();
 
             let client = EthClient::new(endpoint)
                 .await
                 .expect("Error creating client");
-            let contract_address = client.deploy_contract(deployment_code).await.unwrap();
+
+            // Parse contract address
+            if contract_address.starts_with("0x") {
+                contract_address = contract_address[2..].to_string();
+            }
+            let contract_address = hex::decode(contract_address).expect("Invalid contract address");
+            let contract_address = Address::from_slice(&contract_address);
 
             client
                 .submit_proof(contract_address, proof, vec![outputs])

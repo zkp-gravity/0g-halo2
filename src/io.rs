@@ -1,12 +1,23 @@
 //! Utilities for loading images and WNNs from disk.
 
+use std::fmt;
+use std::fs::File;
+use std::io::{BufReader, BufWriter, Write};
 use std::path::Path;
 
-use hdf5::{File, Result};
+use halo2_proofs::halo2curves::bn256::{Bn256, Fr, G1Affine};
+use halo2_proofs::plonk::{ProvingKey, VerifyingKey};
+use halo2_proofs::poly::commitment::Params;
+use halo2_proofs::poly::kzg::commitment::ParamsKZG;
+use halo2_proofs::SerdeFormat::RawBytes;
+use hdf5::{File as Hdf5File, Result as Hdf5Result};
 use image::ImageError;
 use ndarray::{s, Array, Array2, Array3};
 use ndarray::{Ix1, Ix3};
+use serde::{Deserialize, Serialize};
 
+use crate::gadgets::wnn::WnnCircuitParams;
+use crate::gadgets::WnnCircuit;
 use crate::wnn::Wnn;
 
 /// Loads a grayscale image from disk, returning the first channel.
@@ -22,8 +33,8 @@ pub fn load_grayscale_image(img_path: &Path) -> Result<Array2<u8>, ImageError> {
 }
 
 /// Loads a [`Wnn`] from disk, from a file following [this format](https://github.com/zkp-gravity/BTHOWeN-0g/blob/master/output_format_spec.md).
-pub fn load_wnn(path: &Path) -> Result<Wnn> {
-    let file = File::open(path)?;
+pub fn load_wnn(path: &Path) -> Hdf5Result<Wnn> {
+    let file = Hdf5File::open(path)?;
 
     let num_classes = file.attr("num_classes")?.read_scalar::<i64>()? as usize;
     let num_inputs = file.attr("num_inputs")?.read_scalar::<i64>()? as usize;
@@ -102,5 +113,95 @@ pub fn parse_png_file(img_path: &Path) -> Option<usize> {
             }
         }
         _ => None,
+    }
+}
+
+fn with_writer<E>(path: &Path, f: impl FnOnce(&mut BufWriter<File>) -> Result<(), E>)
+where
+    E: fmt::Debug,
+{
+    let file = File::create(path).expect("Unable to create file");
+    let mut writer = BufWriter::new(file);
+    f(&mut writer).expect("Unable to write to file");
+    writer.flush().expect("Unable to flush file");
+}
+
+fn with_reader<T, E>(path: &Path, f: impl FnOnce(&mut BufReader<File>) -> Result<T, E>) -> T
+where
+    E: fmt::Debug,
+{
+    let file = File::open(path).expect("Unable to open file");
+    let mut reader = BufReader::new(file);
+    f(&mut reader).expect("Unable to read from file")
+}
+
+/// Write SRS to file.
+pub fn write_srs(srs: &ParamsKZG<Bn256>, path: &Path) {
+    with_writer(path, |writer| srs.write(writer));
+}
+
+/// Read SRS from file.
+pub fn read_srs(path: &Path) -> ParamsKZG<Bn256> {
+    with_reader(path, |reader| ParamsKZG::read(reader))
+}
+
+/// Write the circuit parameters to file.
+pub fn write_circuit_params(circuit_params: &WnnCircuitParams, path: &Path) {
+    with_writer(path, |writer| serde_json::to_writer(writer, circuit_params));
+}
+
+/// Read the circuit parameters from file.
+pub fn read_circuit_params(path: &Path) -> WnnCircuitParams {
+    with_reader(path, |reader| serde_json::from_reader(reader))
+}
+
+/// Write proving key and verification key to file.
+pub fn write_keys(pk: &ProvingKey<G1Affine>, pk_path: &Path, vk_path: &Path) {
+    with_writer(pk_path, |writer| pk.write(writer, RawBytes));
+    with_writer(vk_path, |writer| pk.get_vk().write(writer, RawBytes));
+}
+
+/// Read proving key from file.
+pub fn read_pk(path: &Path, circuit_params: WnnCircuitParams) -> ProvingKey<G1Affine> {
+    with_reader(path, |reader| {
+        ProvingKey::read::<_, WnnCircuit<_>>(reader, RawBytes, circuit_params)
+    })
+}
+
+/// Read verification key from file.
+pub fn read_vk(path: &Path, circuit_params: WnnCircuitParams) -> VerifyingKey<G1Affine> {
+    with_reader(path, |reader| {
+        VerifyingKey::read::<_, WnnCircuit<_>>(reader, RawBytes, circuit_params)
+    })
+}
+
+/// Wraps the circuit's output and proof, impelements (de)serialization.
+#[derive(Serialize, Deserialize)]
+pub struct ProofWithOutput {
+    pub proof: Vec<u8>,
+    pub output: Vec<Fr>,
+}
+
+impl From<(Vec<u8>, Vec<Fr>)> for ProofWithOutput {
+    fn from((proof, output): (Vec<u8>, Vec<Fr>)) -> Self {
+        Self { proof, output }
+    }
+}
+
+impl From<ProofWithOutput> for (Vec<u8>, Vec<Fr>) {
+    fn from(proof_with_output: ProofWithOutput) -> Self {
+        (proof_with_output.proof, proof_with_output.output)
+    }
+}
+
+impl ProofWithOutput {
+    /// Write the proof with output to file.
+    pub fn write(&self, path: &Path) {
+        with_writer(path, |writer| serde_json::to_writer(writer, self));
+    }
+
+    /// Read the proof with output from file.
+    pub fn read(path: &Path) -> Self {
+        with_reader(path, |reader| serde_json::from_reader(reader))
     }
 }

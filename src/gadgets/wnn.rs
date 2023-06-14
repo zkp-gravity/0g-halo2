@@ -8,6 +8,7 @@ use halo2_proofs::{
     plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
 };
 use ndarray::{Array1, Array2, Array3};
+use serde::{Deserialize, Serialize};
 
 use crate::gadgets::{
     bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
@@ -242,13 +243,14 @@ pub struct WnnCircuitConfig<F: PrimeFieldBits> {
     instance_column: Column<Instance>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct WnnCircuitParams {
     pub p: u64,
     pub l: usize,
     pub n_hashes: usize,
     pub bits_per_hash: usize,
     pub bits_per_filter: usize,
+    pub n_classes: usize,
 }
 
 /// A circuit using [`WnnChip`] to predict the class of an (secret) image.
@@ -270,6 +272,7 @@ impl<F: PrimeFieldBits> WnnCircuit<F> {
         input_permutation: Array1<u64>,
         params: WnnCircuitParams,
     ) -> Self {
+        assert_eq!(bloom_filter_arrays.shape()[0], params.n_classes);
         Self {
             image: Value::known(image),
             bloom_filter_arrays,
@@ -409,6 +412,7 @@ mod tests {
         n_hashes: 2,
         bits_per_hash: 10,
         bits_per_filter: 12,
+        n_classes: 2,
     };
 
     fn make_test_circuit() -> WnnCircuit<Fp> {
