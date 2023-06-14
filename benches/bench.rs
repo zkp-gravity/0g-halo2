@@ -41,7 +41,7 @@ fn bench_verification(b: &mut Bencher, model_info: (u32, &str)) {
     let pk = wnn.generate_proving_key(&kzg_params);
     let (proof, outputs) = wnn.proof(&pk, &kzg_params, &img);
 
-    b.iter(|| wnn.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs));
+    b.iter(|| Wnn::verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs));
 }
 
 fn criterion_benchmark(c: &mut Criterion) {
