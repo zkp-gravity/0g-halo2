@@ -7,7 +7,6 @@ use halo2_proofs::{
     poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
 };
 use hdf5::Result;
-use hex;
 use indicatif::ProgressIterator;
 use zero_g::{
     eth::{dry_run_verifier, gen_evm_verifier, EthClient},
