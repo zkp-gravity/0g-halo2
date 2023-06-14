@@ -9,7 +9,7 @@
 //! # Example: Proving inference on an image file
 //! ```
 //! use std::path::Path;
-//! use zero_g::{checked_in_test_data::*, load_grayscale_image, load_wnn};
+//! use zero_g::{checked_in_test_data::*, load_grayscale_image, load_wnn, wnn::Wnn};
 //! use halo2_proofs::poly::{
 //!     commitment::ParamsProver, kzg::commitment::ParamsKZG,
 //! };
@@ -29,14 +29,14 @@
 //! let (proof, outputs) = wnn.proof(&pk, &kzg_params, &img);
 //!
 //! // Verify proof
-//! wnn.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
+//! Wnn::verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
 //! ```
 
+pub mod eth;
 pub mod gadgets;
 pub mod io;
 pub mod utils;
 pub mod wnn;
-pub mod eth;
 
 pub use io::{load_grayscale_image, load_wnn};
 pub use wnn::Wnn;
