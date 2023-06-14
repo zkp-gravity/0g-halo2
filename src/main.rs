@@ -1,11 +1,13 @@
 use std::{fs, path::PathBuf};
 
 use clap::{Parser, Subcommand};
+use ethers::types::Address;
 use halo2_proofs::{
     halo2curves::bn256::Bn256,
     poly::{commitment::ParamsProver, kzg::commitment::ParamsKZG},
 };
 use hdf5::Result;
+use hex;
 use indicatif::ProgressIterator;
 use zero_g::{
     eth::{dry_run_verifier, gen_evm_verifier, EthClient},
@@ -154,18 +156,12 @@ enum Commands {
     },
     /// Step 4.1: Submit the proof to the EVM verifier
     SubmitProof {
-        /// Path to read the SRS from
-        #[clap(short, long)]
-        srs_path: PathBuf,
-        /// Path to read the verifying key from
-        #[clap(short, long)]
-        vk_path: PathBuf,
-        /// Path to read the circuit params from
-        #[clap(short, long)]
-        circuit_params_path: PathBuf,
         /// Path to read the proof from
         #[clap(short, long)]
         proof_path: PathBuf,
+        /// Contract address (e.g. 0x5fbdb2315678afecb367f032d93f642f64180aa3)
+        #[clap(short, long)]
+        contract_address: String,
         /// The HTTP endpoint to the chain, or "anvil" to use the Anvil testnet.
         /// If not "anvil", the "ETH_PRIVATE_KEY" must be set to your private key.
         #[clap(default_value_t = String::from("anvil"), short, long)]
@@ -331,23 +327,22 @@ async fn main() -> Result<()> {
             Ok(())
         }
         Commands::SubmitProof {
-            srs_path,
-            vk_path,
-            circuit_params_path,
             proof_path,
+            mut contract_address,
             endpoint,
         } => {
-            let kzg_params = read_srs(&srs_path);
-            let circuit_params = read_circuit_params(&circuit_params_path);
-            let vk = read_vk(&vk_path, circuit_params);
             let (proof, outputs) = ProofWithOutput::read(&proof_path).into();
-
-            let deployment_code = gen_evm_verifier(&kzg_params, &vk, vec![outputs.len()]);
 
             let client = EthClient::new(endpoint)
                 .await
                 .expect("Error creating client");
-            let contract_address = client.deploy_contract(deployment_code).await.unwrap();
+
+            // Parse contract address
+            if contract_address.starts_with("0x") {
+                contract_address = contract_address[2..].to_string();
+            }
+            let contract_address = hex::decode(contract_address).expect("Invalid contract address");
+            let contract_address = Address::from_slice(&contract_address);
 
             client
                 .submit_proof(contract_address, proof, vec![outputs])

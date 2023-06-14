@@ -77,8 +77,7 @@ $ZERO_G verify \
 
 echo ""
 echo "==== Running submit-proof"
+# Using Anvil, the contract address is always the same
 $ZERO_G submit-proof \
-    --srs-path test_data/srs_14 \
-    --vk-path test_data/vk \
-    --circuit-params-path test_data/circuit_params.json \
-    --proof-path test_data/proof.json
+    --proof-path test_data/proof.json \
+    --contract-address 0x5fbdb2315678afecb367f032d93f642f64180aa3
