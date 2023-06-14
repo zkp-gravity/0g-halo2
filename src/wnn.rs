@@ -1,7 +1,5 @@
 //! Module implementing the a weightless neural network (WNN), with the ability to proof inference.
 
-use std::time::Instant;
-
 use halo2_proofs::{
     dev::MockProver,
     plonk::{create_proof, keygen_pk, keygen_vk, verify_proof, ProvingKey, VerifyingKey},
@@ -174,21 +172,25 @@ impl Wnn {
             .collect()
     }
 
-    /// Returns the Halo2 circuit corresponding to this WNN.
-    pub fn get_circuit(&self, image: &Array2<u8>) -> WnnCircuit<Fp> {
-        let params = WnnCircuitParams {
+    pub fn get_circuit_params(&self) -> WnnCircuitParams {
+        WnnCircuitParams {
             p: self.p,
             l: self.num_filter_hashes * (self.num_filter_entries as f32).log2() as usize,
             n_hashes: self.num_filter_hashes,
             bits_per_hash: (self.num_filter_entries as f32).log2() as usize,
             bits_per_filter: self.num_filter_inputs,
-        };
+            n_classes: self.bloom_filters.shape()[0],
+        }
+    }
+
+    /// Returns the Halo2 circuit corresponding to this WNN.
+    pub fn get_circuit(&self, image: &Array2<u8>) -> WnnCircuit<Fp> {
         WnnCircuit::new(
             image.clone(),
             self.bloom_filters.clone(),
             self.binarization_thresholds.clone(),
             self.input_permutation.clone(),
-            params,
+            self.get_circuit_params(),
         )
     }
 
@@ -261,7 +263,6 @@ impl Wnn {
 
     /// Verify the given proof.
     pub fn verify_proof(
-        &self,
         proof: &[u8],
         kzg_params: &ParamsKZG<Bn256>,
         vk: &VerifyingKey<G1Affine>,
@@ -276,35 +277,5 @@ impl Wnn {
             &mut transcript,
         )
         .unwrap()
-    }
-
-    /// Generate a proof and verify it.
-    pub fn proof_and_verify(&self, image: &Array2<u8>, k: u32) {
-        println!("Key gen...");
-        let start = Instant::now();
-
-        let kzg_params = ParamsKZG::new(k);
-        let pk = self.generate_proving_key(&kzg_params);
-
-        let duration = start.elapsed();
-        println!("Took: {:?}", duration);
-
-        println!("Proving...");
-        let start = Instant::now();
-
-        let (proof, outputs) = self.proof(&pk, &kzg_params, image);
-
-        let duration = start.elapsed();
-        println!("Took: {:?}", duration);
-
-        println!("Verifying...");
-        let start = Instant::now();
-
-        self.verify_proof(&proof, &kzg_params, pk.get_vk(), &outputs);
-
-        let duration = start.elapsed();
-        println!("Took: {:?}", duration);
-
-        println!("Done!");
     }
 }
