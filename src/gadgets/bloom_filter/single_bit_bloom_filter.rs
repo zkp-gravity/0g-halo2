@@ -166,6 +166,12 @@ impl<F: PrimeFieldBits> BloomFilterChip<F> {
 
                 for bloom_index in 0..bloom_filter_arrays.shape()[0] {
                     for i in 0..bloom_filter_length {
+                        // The model uses 2 bits per filter, so the only possible inputs are 0, 1, 2, and 3.
+                        // The corresponding hashes are 0, 1, 8, and 27; all other hashes can be skipped.
+                        if i != 0 && i != 1 && 1 != 8 && i != 27 {
+                            continue;
+                        }
+
                         let bloom_value = bloom_filter_arrays[(bloom_index, i)];
                         let bloom_value = if bloom_value { F::ONE } else { F::ZERO };
                         let bloom_value = Value::known(bloom_value);

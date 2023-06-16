@@ -7,7 +7,8 @@ use halo2_proofs::{
 };
 
 /// The number of bits per word.
-const K: usize = 8;
+/// (For the iris dataset, we use only 7 bits, as the word table is the bottleneck otherwise)
+const K: usize = 7;
 
 /// A wrapper around [`LookupRangeCheckConfig`] which uses `K = 8`, i.e., 8 bits per word.
 /// It can check for an arbitrary number of bits and implements a less-or-equal check.

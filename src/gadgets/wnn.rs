@@ -5,14 +5,14 @@ use std::marker::PhantomData;
 use ff::PrimeFieldBits;
 use halo2_proofs::{
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner, Value},
-    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance},
+    plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Instance, TableColumn},
 };
 use ndarray::{Array1, Array2, Array3};
 use serde::{Deserialize, Serialize};
 
 use crate::gadgets::{
     bits2num::{Bits2NumChip, Bits2NumChipConfig, Bits2NumInstruction},
-    bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
+    bloom_filter::single_bit_bloom_filter::{BloomFilterChip, BloomFilterChipConfig},
     bloom_filter::{BloomFilterConfig, BloomFilterInstructions},
     hash::{HashChip, HashConfig, HashInstructions},
     range_check::RangeCheckConfig,
@@ -23,7 +23,10 @@ use crate::gadgets::{
     response_accumulator::{ResponseAccumulatorChip, ResponseAccumulatorChipConfig},
 };
 
-use super::encode_image::{EncodeImageChip, EncodeImageChipConfig, EncodeImageInstructions};
+use super::{
+    encode_image::{EncodeImageChip, EncodeImageChipConfig, EncodeImageInstructions},
+    range_check::load_bytes_column,
+};
 
 /// Instructions for the [`WnnChip`].
 pub trait WnnInstructions<F: PrimeFieldBits> {
@@ -49,6 +52,7 @@ pub struct WnnChipConfig<F: PrimeFieldBits> {
     hash_chip_config: HashConfig<F>,
     bloom_filter_chip_config: BloomFilterChipConfig,
     response_accumulator_chip_config: ResponseAccumulatorChipConfig,
+    byte_column: TableColumn,
 }
 
 /// Implements a BTHOWeN- style weightless neural network.
@@ -69,6 +73,7 @@ pub struct WnnChip<F: PrimeFieldBits> {
     response_accumulator_chip: ResponseAccumulatorChip<F>,
 
     input_permutation: Array1<u64>,
+    bloom_filter_arrays_flat: Array2<bool>,
 
     config: WnnChipConfig<F>,
 
@@ -99,10 +104,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         );
         let bits2num_chip = Bits2NumChip::construct(config.bits2num_chip_config.clone());
         let hash_chip = HashChip::construct(config.hash_chip_config.clone());
-        let bloom_filter_chip = BloomFilterChip::construct(
-            config.bloom_filter_chip_config.clone(),
-            &bloom_filter_arrays_flat,
-        );
+        let bloom_filter_chip = BloomFilterChip::construct(config.bloom_filter_chip_config.clone());
         let response_accumulator_chip =
             ResponseAccumulatorChip::construct(config.response_accumulator_chip_config.clone());
 
@@ -114,6 +116,7 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             response_accumulator_chip,
 
             input_permutation,
+            bloom_filter_arrays_flat,
 
             config,
 
@@ -127,16 +130,22 @@ impl<F: PrimeFieldBits> WnnChip<F> {
         advice_columns: [Column<Advice>; 6],
         wnn_config: WnnConfig,
     ) -> WnnChipConfig<F> {
+        let byte_column = meta.lookup_table_column();
+
         let bloom_filter_chip_config = BloomFilterChip::configure(
             meta,
-            advice_columns,
+            advice_columns[0],
+            advice_columns[1],
+            advice_columns[2],
+            advice_columns[3],
+            advice_columns[4],
             wnn_config.bloom_filter_config.clone(),
         );
         let lookup_range_check_config = RangeCheckConfig::configure(
             meta,
             advice_columns[5],
             // Re-use byte column of the bloom filter
-            bloom_filter_chip_config.byte_column,
+            byte_column,
         );
         let encode_image_chip_config = EncodeImageChip::configure(
             meta,
@@ -168,11 +177,15 @@ impl<F: PrimeFieldBits> WnnChip<F> {
             bloom_filter_chip_config,
             response_accumulator_chip_config,
             bits2num_chip_config,
+            byte_column,
         }
     }
 
     pub fn load(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
-        self.bloom_filter_chip.load(layouter)
+        self.bloom_filter_chip
+            .load(layouter, self.bloom_filter_arrays_flat.clone())?;
+
+        load_bytes_column(layouter, self.config.byte_column)
     }
 }
 

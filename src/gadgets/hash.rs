@@ -182,7 +182,7 @@ impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
         let (_input, quotient, remainder, msb, output) =
             self.compute_hash(layouter.namespace(|| "hash"), input)?;
 
-        let HashFunctionConfig { p, l, n_bits } = self.config.hash_function_config;
+        let p = self.config.hash_function_config.p;
 
         // Check that all cells have the right number of bits, with three exceptions:
         // - The input is assumed to already be range-checked
@@ -191,7 +191,9 @@ impl<F: PrimeFieldBits> HashInstructions<F> for HashChip<F> {
         self.config.range_check_config.range_check(
             layouter.namespace(|| "range check quotient"),
             quotient,
-            n_bits * 3 - l,
+            // In this case, the quotient must be 0!
+            0,
+            // n_bits * 3 - l,
         )?;
         self.config.range_check_config.range_check(
             layouter.namespace(|| "range check msb"),

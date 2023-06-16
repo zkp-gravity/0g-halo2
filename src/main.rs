@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf};
+use std::{fs, path::PathBuf, time::Instant};
 
 use clap::{Parser, Subcommand};
 use ethers::types::Address;
@@ -308,7 +308,11 @@ async fn main() -> Result<()> {
             let kzg_params = read_srs(&srs_path);
             let pk = read_pk(&pk_path, wnn.get_circuit_params());
 
-            ProofWithOutput::from(wnn.proof(&pk, &kzg_params, &img)).write(&proof_path);
+            let start = Instant::now();
+            let proof = wnn.proof(&pk, &kzg_params, &img);
+            println!("Proof generation time: {:?}", Instant::now() - start);
+
+            ProofWithOutput::from(proof).write(&proof_path);
             Ok(())
         }
         Commands::Verify {
