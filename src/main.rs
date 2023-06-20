@@ -104,7 +104,7 @@ enum Commands {
         #[clap(short, long)]
         pk_path: PathBuf,
     },
-    /// Step 2.2: Generate the EVM verifier
+    /// Step 2.2: Generate and deploy the EVM verifier
     DeployEvmVerifier {
         /// Path to read the SRS from
         #[clap(short, long)]
@@ -153,7 +153,7 @@ enum Commands {
         #[clap(short, long)]
         proof_path: PathBuf,
     },
-    /// Step 4.1: Submit the proof to the EVM verifier
+    /// Step 4.1: Submit the proof to the (deployed) EVM verifier
     SubmitProof {
         /// Path to read the proof from
         #[clap(short, long)]
